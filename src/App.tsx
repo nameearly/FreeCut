@@ -905,9 +905,10 @@ const MAX_HISTORY_STEPS = 100;
      // console.log("var", prev, factor, variation, playheadPos)
      // console.log("delta", delta, factor)
 
-      playheadRef.current.style.transform = `translateX${pixelsFromLeft * variation}px`;
+      //playheadRef.current.style.transform = `translateX${pixelsFromLeft * variation}px`;
 
-      timelineContainerRef.current.scrollLeft = factor < 0 ? 0 : pixelsFromLeft
+      //timelineContainerRef.current.scrollLeft = factor < 0 ? 0 : pixelsFromLeft 
+      //currentTimeRef.current = currentTimeRef.current * delta
 
       
       return newZoom;
@@ -923,6 +924,7 @@ const MAX_HISTORY_STEPS = 100;
   if (playheadRef.current) {
     const currentPos = currentTimeRef.current * pixelsPerSecond;
     playheadRef.current.style.transform = `translateX(${currentPos}px)`;
+    timelineContainerRef.current.scrollLeft= currentPos
   }
 }, [pixelsPerSecond]);
 
@@ -1746,7 +1748,7 @@ const handleSplit = () => {
 
   const timeOffsetFromClipStart = playheadTime - targetClip.start;
 
-  // Primeira parte: mantém o beginmoment original, mas encurta a duração
+  // Part One: maintains the original beginning moment, but shortens the duration.
   const firstClip: Clip = { 
     ...targetClip, 
     duration: timeOffsetFromClipStart 
@@ -2246,7 +2248,18 @@ const handleNativeDrop = async (paths: string[], mouseX: number, mouseY: number)
 
   //console.log('nativedrop')
 
-  const timelineBounds = timelineContainerRef.current?.getBoundingClientRect();
+  const timelineBounds = timelineContainerRef.current.getBoundingClientRect();
+
+  const isOutsideTimeline = !timelineBounds || 
+    mouseX < timelineBounds.left || 
+    mouseX > timelineBounds.right || 
+    mouseY < timelineBounds.top || 
+    mouseY > timelineBounds.bottom;
+
+
+
+
+
   if (!timelineBounds) return;
 
   //const scrollLeft = timelineContainerRef.current?.scrollLeft || 0;
@@ -2268,93 +2281,112 @@ const handleNativeDrop = async (paths: string[], mouseX: number, mouseY: number)
   const dropTime = Math.max(0, relativeX / PIXELS_PER_SECOND) * (2/pixelsPerSecond);
   
   //console.log(`Mouse X: ${mouseX}, Rect Left: ${rect.left}, Scroll: ${scrollLeft}, Final Time: ${dropTime}`);
-
-  for (const path of paths) {
-    try {
-      await invoke('import_asset', { projectPath: currentProjectPath, filePath: path });
-      const fileName = path.split(/[\\/]/).pop() || "Asset";
-
-      var meta
-      
-      try
-      {
-        meta = await invoke<{duration: number}>('get_video_metadata', { path: path });
-        
+  
+  if (isOutsideTimeline) {
+    for (const path of paths) {
+      try {
+        await invoke('import_asset', { projectPath: currentProjectPath, filePath: path });
+      } catch (err) {
+        console.error("Import error:", err);
       }
-      catch (err)
-      {
-        meta = {duration: 10}
-      }
-
-      
-      const duration = meta.duration
-
-      const TRACK_HEIGHT = 80;
-      const relativeY = mouseY - timelineBounds.top;
-      const targetTrackIndex = Math.floor(relativeY / TRACK_HEIGHT);
-
-      //Organize tracks as the are in the render to know its order
-      const tracks_order = order_tracks()
-
-      
-
-
-
-      // If you drop it below the last or above the tracks area, it creates a new one.
-
-
-
-      if(!tracks_order[targetTrackIndex])
-      {
-        await loadAssets();
-        createClipOnNewTrack(fileName, dropTime)
-        return
-      }
-
-
-      const isBusy = (isSpaceOccupied(tracks_order[targetTrackIndex].id, dropTime, Math.min(duration, 10), null))
-      const isNotType = tracks_order[targetTrackIndex].type !== knowTypeByAssetName(fileName,true)
-
-      //console.log('empty var', tracks_order[targetTrackIndex], isBusy, isNotType, targetTrackIndex >= tracks.length , targetTrackIndex)
-
-      //check if drop on a empty place again and if the place is on a track but is busy or is not the clip's type 
-
-      if ((targetTrackIndex >= tracks.length || targetTrackIndex < 0) ||  isBusy  || isNotType) {
-        await loadAssets();
-        createClipOnNewTrack(fileName, dropTime)
-        return
-      } else {
-
-          await loadAssets();
-
-          
-        
-         // Drop em track existente
-          const targetTrackId = tracks_order[targetTrackIndex].id;
-          
-          setClips(prev => [...prev, {
-            id: crypto.randomUUID() ,
-            name: fileName,
-            start: dropTime,
-            duration: Math.min(duration, 10),
-            color: getRandomColor(),
-            trackId: targetTrackId,
-            maxduration: duration ? duration : 10,
-            beginmoment: 0
-          }]);
-
-
-          setTracks( prev =>[... prev, {id: targetTrackId, type: knowTypeByAssetName(fileName, true)}]
-          )
-        
-
-
-
-      }
-    } catch (err) {
-      console.error("Native Import Error:", err);
     }
+    loadAssets();
+    showNotify("Assets imported", "success");
+    return;
   }
+  
+    for (const path of paths) {
+      try {
+        await invoke('import_asset', { projectPath: currentProjectPath, filePath: path });
+        const fileName = path.split(/[\\/]/).pop() || "Asset";
+
+        var meta
+        
+        try
+        {
+          meta = await invoke<{duration: number}>('get_video_metadata', { path: path });
+          
+        }
+        catch (err)
+        {
+          meta = {duration: 10}
+        }
+
+        
+        const duration = meta.duration
+
+        const TRACK_HEIGHT = 80;
+        const relativeY = mouseY - timelineBounds.top;
+        const targetTrackIndex = Math.floor(relativeY / TRACK_HEIGHT);
+
+        //Organize tracks as the are in the render to know its order
+        const tracks_order = order_tracks()
+
+        
+
+
+
+        // If you drop it below the last or above the tracks area, it creates a new one.
+
+
+
+        if(!tracks_order[targetTrackIndex])
+        {
+          await loadAssets();
+          createClipOnNewTrack(fileName, dropTime)
+          return
+        }
+
+
+        const isBusy = (isSpaceOccupied(tracks_order[targetTrackIndex].id, dropTime, Math.min(duration, 10), null))
+        const isNotType = tracks_order[targetTrackIndex].type !== knowTypeByAssetName(fileName,true)
+
+        //console.log('empty var', tracks_order[targetTrackIndex], isBusy, isNotType, targetTrackIndex >= tracks.length , targetTrackIndex)
+
+        //check if drop on a empty place again and if the place is on a track but is busy or is not the clip's type 
+
+        if ((targetTrackIndex >= tracks.length || targetTrackIndex < 0) ||  isBusy  || isNotType) {
+          await loadAssets();
+          createClipOnNewTrack(fileName, dropTime)
+          return
+        } else {
+
+            await loadAssets();
+
+            
+          
+          // Drop em track existente
+            const targetTrackId = tracks_order[targetTrackIndex].id;
+            
+            setClips(prev => [...prev, {
+              id: crypto.randomUUID() ,
+              name: fileName,
+              start: dropTime,
+              duration: Math.min(duration, 10),
+              color: getRandomColor(),
+              trackId: targetTrackId,
+              maxduration: duration ? duration : 10,
+              beginmoment: 0
+            }]);
+
+
+            setTracks( prev =>[... prev, {id: targetTrackId, type: knowTypeByAssetName(fileName, true)}]
+            )
+          
+
+
+
+        }
+      } catch (err) {
+        console.error("Native Import Error:", err);
+      }
+    }
+
+  
+
+
+
+
   //loadAssets();
 };
 
@@ -2539,7 +2571,7 @@ const openProject = async (path: string) => {
       showNotify("Download Complete!", "success");
       setIsImportModalOpen(false);
       setYoutubeUrl("");
-      loadAssets();
+      await loadAssets();
     } catch (e) {
       showNotify("YT-DLP Error: Check your JS Runtime", "error");
     } finally {
@@ -2684,7 +2716,8 @@ const isSpaceOccupied = (trackId: number, start: number, duration: number, exclu
 
  
 const handleDropOnTimeline = (e: React.DragEvent, trackId: number) => {
-  e.preventDefault();
+   e.preventDefault();
+  e.stopPropagation();
   
   //const isTimelineClip = e.dataTransfer.getData("isTimelineClip") === "true";
   //const anchorStart = parseFloat(e.dataTransfer.getData("anchorStart") || "0");
@@ -3261,7 +3294,7 @@ return (
               <div className="text-[10px] font-mono text-zinc-400 flex items-center gap-2 bg-black/40 px-3 py-1 rounded border border-zinc-800/50">
                 <Clock size={12} className="text-zinc-600" />
                 <span className="text-white font-bold tracking-widest min-w-[80px]">
-                  {formatTime(playheadPos/pixelsPerSecond)}
+                  {formatTime(currentTimeRef.current)}
                 </span>
               </div>
 
@@ -3548,13 +3581,13 @@ return (
         <div className="fixed inset-0 bg-black/90 z-[400] flex items-center justify-center p-4">
           <motion.div initial={{ y: 20 }} animate={{ y: 0 }} className="bg-[#18181b] border border-zinc-800 p-8 rounded-3xl w-full max-w-md">
             <h2 className="text-xl font-black flex items-center gap-3 text-white mb-6"><Youtube className="text-red-600" /> YT DOWNLOAD</h2>
-            <input type="text" placeholder="URL do vídeo..." value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)}
+            <input type="text" placeholder="Video URL..." value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)}
               className="w-full bg-black border border-zinc-700 rounded-xl px-4 py-4 text-sm font-bold text-white outline-none focus:border-red-600 mb-6" />
             <button disabled={isDownloading} onClick={handleYoutubeDownload}
               className={`w-full py-4 rounded-xl font-black text-xs text-white ${isDownloading ? 'bg-zinc-800' : 'bg-red-600 hover:bg-red-700'}`}>
               {isDownloading ? "DOWNLOADING..." : "FETCH MEDIA"}
             </button>
-            <button onClick={() => setIsImportModalOpen(false)} className="w-full mt-4 text-[10px] text-zinc-500 font-bold uppercase">Fechar</button>
+            <button onClick={() => setIsImportModalOpen(false)} className="w-full mt-4 text-[10px] text-zinc-500 font-bold uppercase"> Close </button>
           </motion.div>
         </div>
       )}
