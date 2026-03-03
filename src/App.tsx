@@ -2127,12 +2127,14 @@ const knowTypeByAssetName = (assetName: string, typeTrack: boolean = false) =>
 }
 
 
-const createClipOnNewTrack =  async (assetName: string, dropTime: number) => {
+const createClipOnNewTrack =  async (assetName: string, dropTime: number, beginmoment: number|null = null) => {
     
   
   var meta;
 
   const path = `${currentProjectPath}/videos/${assetName}`
+
+  console.log('entrou no newtrack')
   
   try
   {
@@ -2176,7 +2178,7 @@ const createClipOnNewTrack =  async (assetName: string, dropTime: number) => {
             color: getRandomColor(),
             trackId: newTrackId,
             maxduration: duration,
-            beginmoment: deleteClip ? deleteClip.beginmoment : 0
+            beginmoment: beginmoment ? beginmoment : deleteClip ? deleteClip.beginmoment : 0
           };
 
 
@@ -2212,11 +2214,21 @@ const handleDropOnEmptyArea = (e: React.DragEvent) => {
   e.preventDefault();
   e.stopPropagation();
 
+
+  //colect subclip if its dropped
+  const data = e.dataTransfer.getData("application/json") || null;
+  const droppedClip = data ? JSON.parse(data) : null;
+  
+
+
+
+
+
   
   if (e.dataTransfer.files.length > 0) return;
 
   const assetName = e.dataTransfer.getData("assetName");
-  if (!assetName) return;
+  if (!assetName && !data) return;
 
   const container = e.currentTarget.getBoundingClientRect();
   const scrollLeft = timelineContainerRef.current?.scrollLeft || 0;
@@ -2234,10 +2246,11 @@ const handleDropOnEmptyArea = (e: React.DragEvent) => {
   // If drop above or below, but close a new track is created
   
   if (relativeY < -margin) {
-    createClipOnNewTrack(assetName, dropTime);
+    droppedClip.beginmoment ? createClipOnNewTrack(droppedClip.name, dropTime, droppedClip.beginmoment) : createClipOnNewTrack(assetName, dropTime);
     
   } else if (relativeY > totalTracksHeight + margin) {
-    createClipOnNewTrack(assetName, dropTime);
+    droppedClip.beginmoment ? createClipOnNewTrack(droppedClip.name, dropTime, droppedClip.beginmoment) : createClipOnNewTrack(assetName, dropTime);
+
     
 
   }
@@ -2323,6 +2336,23 @@ const handleNativeDrop = async (paths: string[], mouseX: number, mouseY: number)
   if (isOutsideTimeline) {
     for (const path of paths) {
       try {
+
+        const fileName = path.split(/[\\/]/).pop() || "File";
+        const extension = fileName.split('.').pop()?.toLowerCase() || '';
+
+
+        const isImage = imageExtensions.includes(extension);
+        const isAudio = audioExtensions.includes(extension);
+        const isVideo = videoExtensions.includes(extension);
+
+        if (!isImage && !isAudio && !isVideo) {
+          showNotify("Invalid file type: Only video, audio, and images are allowed", "error");
+          return;
+        }
+
+
+
+        
         await invoke('import_asset', { projectPath: currentProjectPath, filePath: path });
       } catch (err) {
         console.error("Import error:", err);
@@ -2334,6 +2364,24 @@ const handleNativeDrop = async (paths: string[], mouseX: number, mouseY: number)
   }
   
     for (const path of paths) {
+
+
+        const fileName = path.split(/[\\/]/).pop() || "File";
+        const extension = fileName.split('.').pop()?.toLowerCase() || '';
+
+
+        const isImage = imageExtensions.includes(extension);
+        const isAudio = audioExtensions.includes(extension);
+        const isVideo = videoExtensions.includes(extension);
+
+
+        if (!isImage && !isAudio && !isVideo) {
+          showNotify("Invalid file type: Only video, audio, and images are allowed", "error");
+          return;
+        }
+
+
+
       try {
         await invoke('import_asset', { projectPath: currentProjectPath, filePath: path });
         const fileName = path.split(/[\\/]/).pop() || "Asset";
@@ -2801,13 +2849,15 @@ const handleDropOnTimeline = (e: React.DragEvent, trackId: number) => {
       const defaultDuration = assetNow ? Math.min(assetNow.duration, 10) : 10;
       const totalMaxDuration = assetNow ? assetNow.duration : 10;
 
-      const isBusy = (isSpaceOccupied(trackId, dropTime, Math.min(defaultDuration, 10), null))
+      const isBusy = (isSpaceOccupied(trackId, dropTime, droppedClip.duration, null))
       const isNotType = tracks.find( t => t.id === trackId)?.type !== knowTypeByAssetName(droppedClip.name ,true)
 
 
+      console.log('data ', isBusy, isNotType )
       
-      if(!isBusy || !isNotType)
+      if(!isBusy && !isNotType)
       {
+        console.log('caiu')
         const newClip: Clip = {
             id: crypto.randomUUID(), 
             name: droppedClip.name,
@@ -2824,8 +2874,9 @@ const handleDropOnTimeline = (e: React.DragEvent, trackId: number) => {
       }
       else
       {
-          //createClipOnNewTrack(assetName, dropTime)
-          return
+          console.log('lala')
+          createClipOnNewTrack(droppedClip.name, dropTime, droppedClip.beginmoment)
+          
 
       }
       
@@ -2914,7 +2965,7 @@ const handleDropOnTimeline = (e: React.DragEvent, trackId: number) => {
 
 
     
-    if(!isBusy || !isNotType)
+    if(!isBusy && !isNotType)
     {
        const newClip: Clip = {
           id: crypto.randomUUID(), 
@@ -2979,50 +3030,11 @@ const handleImportFile = async () => {
       return;
     }
 
-    // 4. Assign the correct media type
-    let type: 'video' | 'audio' | 'image' = 'video';
-    if (isImage) type = 'image';
-    if (isAudio) type = 'audio';
+    await invoke('import_asset', { projectPath: currentProjectPath, filePath: filePath });
+     loadAssets();
+    showNotify("Assets imported", "success");
 
-    let duration = 10; // Default duration for images
 
-    if (type !== 'image') {
-      // 5. Call Rust backend to get the real duration for video/audio
-      try {
-        const meta = await invoke<{duration: number}>('get_video_metadata', { path: filePath });
-        duration = meta.duration;
-      } catch (metaError) {
-        console.error("Failed to fetch metadata, using default duration:", metaError);
-        duration = 10; // Fallback duration
-      }
-    }
-
-    if(type != 'video')
-    {
-       try {
-          const audioName = await invoke('extract_audio', { 
-            projectPath: currentProjectPath, 
-            fileName: fileName 
-          });
-          //console.log("Audio extracted", audioName);
-        } catch (e) {
-          console.error("Falha na extração automática:", e);
-        }
-    }
-
-    // 6. Create the new asset object
-    const newAsset: Asset = {
-      name: fileName,
-      path: filePath,
-      duration: duration,
-      type: type
-    };
-
-    // 7. Update state and notify the user
-    setAssets(prev => [...prev, newAsset]);
-    showNotify(`Imported ${type}: ${fileName}`, "success");
-
-   
     
   } catch (err) {
     console.error(err);
@@ -3211,7 +3223,7 @@ return (
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: index * 0.05 }}
-                        onClick={(e) => {toggleAssetSelection(asset, e.shiftKey || e.ctrlKey); setSourceAsset(asset)}}
+                        onClick={(e) => {toggleAssetSelection(asset, e.shiftKey || e.ctrlKey); setSourceAsset(asset); setInPoint(0); setOutPoint(0); setCurrentTime2(0)}}
                         className={`group relative aspect-video bg-[#1a1a1a] rounded-lg overflow-hidden border border-white/5 hover:border-red-600/50 transition-colors cursor-pointer
                         ${selectedAssets.includes(asset) ? 'bg-red-500/10 border-red-500' : 'bg-[#151515] border-zinc-800 hover:border-zinc-600'}`}
                         draggable="true"
