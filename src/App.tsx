@@ -146,9 +146,34 @@ export default function App() {
   const MIN_ZOOM = 1;
   const MAX_ZOOM = 200;
 
+  //Resizible Aside Asetts 
+
+  const [sidebarWidth, setSidebarWidth] = useState(256); // 256px is default (w-64)
+  const isResizingSidebar = useRef(false);
 
 
+   useEffect(() => {
+      const handleMouseMove = (e) => {
+        if (!isResizingSidebar.current) return;
+        
+        // Define limites mínimos e máximos para a largura
+        const newWidth = Math.max(180, Math.min(600, e.clientX));
+        setSidebarWidth(newWidth);
+      };
 
+      const handleMouseUp = () => {
+        isResizingSidebar.current = false;
+
+        document.body.style.cursor = 'default';
+      };
+
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+      };
+    }, []);
 
 
   const [isProjectLoaded, setIsProjectLoaded] = useState(false);
@@ -199,26 +224,27 @@ export default function App() {
 
   const clipboardRef = useRef<Clip[]>([]);
 
-  // Wrapper to log setTracks 
-  /*
-  const setTracks = (newValue: any) => {
-  console.group("%c SET_TRACKS DISPARADO ", "background: #222; color: #bada55; font-weight: bold;");
-  console.log("Novo Valor/Função:", newValue);
-  console.trace("Origem da chamada:"); // Isso vai te dar o arquivo e a linha
-  console.groupEnd();
 
-  // Chama a função original para não quebrar o React
-  _setTracks(newValue);
-};
+  //const to source monitor
 
-*/
+const [sourceAsset, setSourceAsset] = useState<Asset | null>(null);
+const [inPoint, setInPoint] = useState<number>(0);
+const [outPoint, setOutPoint] = useState<number>(0);
+const sourceVideoRef = useRef<HTMLVideoElement>(null);
+
+ 
 
 //const to put thumbnaisl in clip
 
 const [timelineThumbs, setTimelineThumbs] = useState<Record<string, { start: string, end: string }>>({});
 
 
+//const to make auxiliar preview resizible
+const [sourceWidth, setSourceWidth] = useState(320); // Largura inicial (aprox. w-80)
+const isResizingSource = useRef(false);
+
 //const to preview videos
+
 
 
 const [currentTime, setCurrentTime] = useState(0); // Playhead time
@@ -233,6 +259,15 @@ const [topAudios, setTopAudios] = useState<Clip [] | null>(null);
 //State management for rendering feedback
 const [renderStatus, setRenderStatus] = useState<'idle' | 'rendering' | 'success'>('idle');
 const [renderPercent, setRenderPercent] = useState(0);
+
+
+//code source monitor only work when mouse is over it
+const [isMouseOverSource, setIsMouseOverSource] = useState(false);
+const [currentTime2, setCurrentTime2] = useState(0); // Playhead time
+const [isPlaying2, setIsPlaying2] = useState(false); 
+
+
+
 
 // Dentro do seu componente App
 useEffect(() => {
@@ -353,6 +388,38 @@ const updatePreview = (currentTime: number) => {
 
 };
 
+
+//code to make auxiliar preview resizible
+
+useEffect(() => {
+  const handleMouseMove = (e) => {
+    // Redimensionar Sidebar (Media Library)
+    if (isResizingSidebar.current) {
+      const newWidth = Math.max(180, Math.min(500, e.clientX));
+      setSidebarWidth(newWidth);
+    }
+    
+    // Redimensionar Source Monitor
+    if (isResizingSource.current) {
+      // Calculamos a largura baseada na distância entre o mouse e o fim da sidebar
+      const newWidth = Math.max(200, Math.min(600, e.clientX - sidebarWidth));
+      setSourceWidth(newWidth);
+    }
+  };
+
+  const handleMouseUp = () => {
+    isResizingSidebar.current = false;
+    isResizingSource.current = false;
+    document.body.style.cursor = 'default';
+  };
+
+  window.addEventListener('mousemove', handleMouseMove);
+  window.addEventListener('mouseup', handleMouseUp);
+  return () => {
+    window.removeEventListener('mousemove', handleMouseMove);
+    window.removeEventListener('mouseup', handleMouseUp);
+  };
+}, [sidebarWidth]); // Adicione sidebarWidth como dependência para cálculo preciso
 
 //show what audios to play in audio preview
 const updateAudio = () => {
@@ -550,7 +617,7 @@ useEffect(() => {
 
 
 
-
+//Render main frame
   const drawFrame = async (time: number) => {
     if (!canvasRef.current) return;
     
@@ -1601,13 +1668,12 @@ const handleResize = (id: string, deltaX: number, side: 'left' | 'right') => {
           handleSplit();
         }
 
+        
+    
+        
 
-        //Space (Player Needle move)  
-        if (e.code === 'Space') {
-          e.preventDefault(); // stop o scroll page
-          togglePlay();
-        }
 
+     
         // Ctrl + Q (Select Left)
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'q') {
           e.preventDefault();
@@ -1636,6 +1702,12 @@ const handleResize = (id: string, deltaX: number, side: 'left' | 'right') => {
 
 
 
+        if(!isMouseOverSource && e.code === 'Space')
+        {
+          e.preventDefault();
+          togglePlay();
+        }  
+
       
 
 
@@ -1645,11 +1717,50 @@ const handleResize = (id: string, deltaX: number, side: 'left' | 'right') => {
       };
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [selectedClipIds, selectedAssets , clips, isSnapEnabled, assets, history, redoStack]);
+    }, [selectedClipIds, selectedAssets , clips, isSnapEnabled, assets, history, redoStack, isMouseOverSource, sourceAsset, inPoint, outPoint]);
+
+
+
+
+
+const isMouseOverRef = useRef(false);
+
+useEffect(() => {
+  const handleKeyDown = (e: KeyboardEvent) => {
+    
+    
+    
+    
+    if (!isMouseOverRef.current) return;
+
+    if (e.code === 'Space') {
+      e.preventDefault();
+      togglePlay2();
+    }
+
+
+    const time = audioRef2.current?.currentTime || 0
+    if (e.key.toLowerCase() === 'i') setInPoint(time);
+    if (e.key.toLowerCase() === 'o') setOutPoint(time);
+
+    console.log('set to', time)
+  };
+
+  window.addEventListener('keydown', handleKeyDown);
+  return () => window.removeEventListener('keydown', handleKeyDown);
+}, []); 
+
+
+
+
+
+
+
+
 
 
 // Function to synchronize currentTime with currentTimeRef 
-  const seekTo = (newTime: number) => {
+const seekTo = (newTime: number) => {
   
     currentTimeRef.current = newTime;
   
@@ -1874,181 +1985,108 @@ const handleSplit = () => {
       e.dataTransfer.dropEffect = "copy";
     };
 
+//Play and Pause of Player Source Auxiliar
 
-//avoid clip over another
+const [sourceCurrentTime, setSourceCurrentTime] = useState(0);
+const [isSourcePlaying, setIsSourcePlaying] = useState(false);
 
-/*
-useEffect(() => {
-  if (clips.length === 0) return;
 
-  // 1. Identifica quais clipes precisamos validar:
-  // Se houver selecionados, validamos eles. Se não, validamos apenas o último adicionado.
-  const idsToValidate = selectedClipIds.length > 0 
-    ? selectedClipIds 
-    : [clips[clips.length - 1].id];
+const audioRef2 = useRef<HTMLAudioElement>(null);
+const canvasRef2 = useRef<HTMLCanvasElement>(null);
 
-  let hasChanges = false;
-  let newClips = [...clips];
-  let newTracks = [...tracks];
 
-  // 2. Processamos cada clipe da lista de validação
-  idsToValidate.forEach(id => {
-    const clipIndex = newClips.findIndex(c => c.id === id);
-    if (clipIndex === -1) return;
+    // Render Video Frame to Auxiliar Monitor
+    const renderFrame2 = async (time: number) => {
 
-    const clip = newClips[clipIndex];
-    const assetType = knowTypeByAssetName(clip.name, true);
-    
-    // Normalização de tipo (audio asset -> audio track)
-    const requiredType = assetType === 'audio' ? 'audio' : (assetType === 'image' ? 'video' : assetType);
 
-    let currentTrackId = clip.trackId;
-    let currentTrack = newTracks.find(t => t.id === currentTrackId);
+      
+      if (!sourceAsset || !canvasRef2.current) return;
+      
+      try {
+        // Busca o frame exato via invoke
+        const frameBase64: string = await invoke("get_video_frame", { 
+          path: sourceAsset.path, 
+          timeMs: time * 1000
+        });
 
-    // 3. Loop de colisão e compatibilidade
-    // Importante: isSpaceOccupied deve checar contra o novo estado 'newClips'
-    while (isSpaceOccupied(currentTrackId, clip.start, clip.duration, clip.id) || (currentTrack && currentTrack.type !== requiredType)) {
-      currentTrackId++;
-      currentTrack = newTracks.find(t => t.id === currentTrackId);
 
-      // Se a track não existe, criamos ela virtualmente para o loop continuar
-      if (!currentTrack) {
-        const newTask = { id: currentTrackId, type: requiredType as 'video' | 'audio' | 'effects' };
-        newTracks.push(newTask);
-        currentTrack = newTask;
-        hasChanges = true;
+       
+        const ctx = canvasRef2.current.getContext("2d");
+        const img = new Image();
+        img.onload = () => {
+          if (ctx && canvasRef2.current) {
+
+            canvasRef2.current.width = img.width;
+            canvasRef2.current.height = img.height
+            ctx.drawImage(img, 0, 0);
+          }
+        };
+        img.src = frameBase64;
+      } catch (err) {
+        console.error("Frame render error:", err);
       }
-    }
+    };
 
-    // Se o ID da track mudou, atualizamos no nosso array temporário
-    if (currentTrackId !== clip.trackId) {
-      newClips[clipIndex] = { ...clip, trackId: currentTrackId };
-      hasChanges = true;
-    }
-  });
-
-  // 4. Aplicação atômica do estado
-  if (hasChanges) {
-    // Ordenação para manter a lógica visual (Video topo, Audio baixo)
-    setTracks(newTracks.sort((a, b) => {
-      const priority = (t: string) => (t === 'audio' ? 1 : 0);
-      return priority(a.type) - priority(b.type) || a.id - b.id;
-    }));
-    setClips(newClips);
-  }
-}, [clips.length, selectedClipIds]); */
-
-// Usamos clips.length para disparar na criação e selectedClipIds para disparar no movimento
-
-/*
-useEffect(() => {
-  if (clips.length === 0) return;
-
-  const lastClip = clips[clips.length - 1];
-  const lastClipType = knowTypeByAssetName(lastClip.name, true)
-
-  let currentTrackId = lastClip.trackId;
-  let currentTrack = tracks.find( t => t.id === currentTrackId) 
-
-
-    while (isSpaceOccupied(currentTrackId, lastClip.start, lastClip.duration, lastClip.id) || ( lastClipType !== currentTrack?.type) ) {
-      currentTrackId++;
-      currentTrack = tracks.find( t => t.id === currentTrackId)
-
-
-      if(!currentTrack)
-      {
-        //create a track of the correct type if don't exist
-        setTracks(prev => [... prev, {id: currentTrackId, type: lastClipType as 'video' | 'audio' | 'effects'}])
-          setClips(prevClips => 
-          prevClips.map(c => 
-            c.id === lastClip.id ? { ...c, trackId: currentTrackId } : c
-          )
-        );
-        break
-      }  
+    //Sync Canvas with Audio
+    useEffect(() => {
 
       
-      setClips(prevClips => 
-        prevClips.map(c => 
-          c.id === lastClip.id ? { ...c, trackId: currentTrackId } : c
-        )
-      );
+      if(!sourceAsset) return
+      if(!audioRef2.current) return
 
-      
-      
-      console.log(`Clip "${lastClip.name}" movido para Track ${currentTrackId} por colisão ou incompatibilidade de tipo, seu tipo é ${lastClipType}.`);
-  }
-}, [clips]); // Importante: monitorar apenas o .length para evitar loop infinito ao mudar o trackId    
+      if (isPlaying2) {
 
-*/
-
-
-
-
-/*
-useEffect(() => {
-  if (clips.length === 0) return;
-
-  let hasChanged = false;
-  let tempClips = [...clips];
-  let tempTracks = [...tracks];
-
-  // Percorremos todos os clips para garantir integridade total
-  tempClips = tempClips.map((currentClip) => {
-    const clipType = knowTypeByAssetName(currentClip.name, true);
-    // Mapeia 'audio' do asset para 'music' ou 'audio' da track conforme sua interface
-    const requiredTrackType = clipType === 'audio' ? 'audio' : 
-                             (clipType === 'image' ? 'video' : clipType);
-
-    let targetTrackId = currentClip.trackId;
-    let finalTrackId = targetTrackId;
-
-    // Loop de busca de track válida para este clip específico
-    while (true) {
-      const targetTrack = tempTracks.find(t => t.id === finalTrackId);
-      
-      // Verifica colisão: passamos o tempClips para o isSpaceOccupied 
-      // (se sua função permitir) ou verificamos contra os clips já processados
-      const collision = isSpaceOccupied(finalTrackId, currentClip.start, currentClip.duration, currentClip.id);
-      
-      const typeMismatch = targetTrack && targetTrack.type !== requiredTrackType;
-
-      if (!collision && !typeMismatch) {
-        // Se a track não existe, criamos ela virtualmente para o próximo clip saber que ela existe
-        if (!targetTrack) {
-          tempTracks.push({ 
-            id: finalTrackId, 
-            type: requiredTrackType as 'video' | 'audio' | 'effects' 
-          });
-          hasChanged = true;
-        }
-        break; 
+        
+        
+        const interval = setInterval(() => {
+          if (audioRef2.current) {
+            const time = audioRef2.current.currentTime;
+            setCurrentTime2(time);
+            renderFrame2(time);
+          }
+        }, 1000 / 10); // 30 FPS
+        return () => clearInterval(interval);
+        
+        
       }
+    }, [isPlaying2, sourceAsset, currentTime2]);
 
-      // Se deu erro, pula para a próxima track
-      finalTrackId++;
+
+
+
+    const togglePlay2 = async () => {
+  if (!audioRef2.current) return;
+
+  try {
+    if (audioRef2.current.paused) {
+      await audioRef2.current.play();
+      setIsPlaying2(true);
+    } else {
+      audioRef2.current.pause();
+      setIsPlaying2(false);
     }
-
-    if (finalTrackId !== currentClip.trackId) {
-      hasChanged = true;
-      return { ...currentClip, trackId: finalTrackId };
-    }
-
-    return currentClip;
-  });
-
-  if (hasChanged) {
-    // Ordenamos as tracks para manter a lógica visual (Video/Effects topo, Audio baixo)
-    setTracks(tempTracks.sort((a, b) => {
-      const priority = (t: string) => (t === 'audio' ? 1 : 0);
-      return priority(a.type) - priority(b.type) || a.id - b.id;
-    }));
-    
-    setClips(tempClips);
+  } catch (err) {
+    console.error("Erro in Play/Pause:", err);
   }
-}, [clips]); // Monitorar length evita loops infinitos de movimentação
-*/
+};
+
+
+    useEffect( () => {
+
+      if(!sourceAsset) return
+      if(!audioRef2.current) return
+
+
+      const audio = `${sourceAsset.name.split('.').slice(0, -1).join('.')}.mp3`
+      const path =  knowTypeByAssetName(sourceAsset.name) === 'video' ? `http://127.0.0.1:1234/${encodeURIComponent(`${currentProjectPath}/extracted_audios/${audio}`)}` :
+      `http://127.0.0.1:1234/${encodeURIComponent(`${currentProjectPath}/videos/${sourceAsset.name}`)}`
+
+
+      audioRef2.current.src = path
+            
+
+
+    }, [sourceAsset])
 
 
 
@@ -2719,14 +2757,6 @@ const handleDropOnTimeline = (e: React.DragEvent, trackId: number) => {
    e.preventDefault();
   e.stopPropagation();
   
-  //const isTimelineClip = e.dataTransfer.getData("isTimelineClip") === "true";
-  //const anchorStart = parseFloat(e.dataTransfer.getData("anchorStart") || "0");
-  
-  //const rect = e.currentTarget.getBoundingClientRect();
-  //const scrollLeft = timelineContainerRef.current?.scrollLeft || 0;
-  //const rawDropTime = (e.clientX - rect.left + scrollLeft) / pixelsPerSecond;
-  //const dropTime = getSnappedTime(rawDropTime, deleteClipId, trackId);
-
   const previousTrackRaw = e.dataTransfer.getData("previousTrackId");
   const previousTrack = previousTrackRaw ? Number(previousTrackRaw) : null;
 
@@ -2736,7 +2766,6 @@ const handleDropOnTimeline = (e: React.DragEvent, trackId: number) => {
 
   const isTimelineClip = e.dataTransfer.getData("isTimelineClip") === "true";
   const anchorStart = parseFloat(e.dataTransfer.getData("anchorStart") || "0");
-  const assetName = e.dataTransfer.getData("assetName");
   
   // Take offset
   const clickOffset = parseFloat(e.dataTransfer.getData("clickOffset") || "0");
@@ -2752,7 +2781,64 @@ const handleDropOnTimeline = (e: React.DragEvent, trackId: number) => {
   
   const dropTime = getSnappedTime(rawDropTime, deleteClipId, trackId);
 
-    
+
+  const data = e.dataTransfer.getData("application/json") || null;
+  
+  //if its a subclip
+
+  if (data)
+  {
+      const droppedClip = JSON.parse(data);
+
+      console.log('data get', droppedClip)
+
+
+      // 1. Try to find the corresponding asset.
+      const assetNow = assets.find(a => a.name === droppedClip.name);
+      
+      // 2. Set the default duration safely.
+      // If assetNow exists and is greater than 10, use 10. Otherwise, use its duration or 5 (total fallback).
+      const defaultDuration = assetNow ? Math.min(assetNow.duration, 10) : 10;
+      const totalMaxDuration = assetNow ? assetNow.duration : 10;
+
+      const isBusy = (isSpaceOccupied(trackId, dropTime, Math.min(defaultDuration, 10), null))
+      const isNotType = tracks.find( t => t.id === trackId)?.type !== knowTypeByAssetName(droppedClip.name ,true)
+
+
+      
+      if(!isBusy || !isNotType)
+      {
+        const newClip: Clip = {
+            id: crypto.randomUUID(), 
+            name: droppedClip.name,
+            start: dropTime,
+            duration: droppedClip.duration,
+            color: getRandomColor(),
+            trackId: trackId,
+            maxduration: totalMaxDuration,
+            beginmoment: droppedClip.beginmoment
+          };
+
+          setClips(prev => [...prev, newClip]);
+          setDeleteClipId(null);
+      }
+      else
+      {
+          //createClipOnNewTrack(assetName, dropTime)
+          return
+
+      }
+      
+      
+      return
+  }
+
+  
+
+
+
+
+  const assetName = e.dataTransfer.getData("assetName");
 
 
   saveHistory(clips, assets);
@@ -3056,7 +3142,12 @@ return (
 
         {/* Top Section: Sidebar + Preview */}
         <main className="flex-1 flex overflow-hidden min-h-0">
-          <aside className="w-64 border-r border-zinc-800 bg-[#0c0c0c] flex flex-col hidden lg:flex">
+          
+          
+          
+          <aside 
+          style={{ width: `${sidebarWidth}px` }}
+          className="relative border-r border-zinc-800 bg-[#0c0c0c] flex flex-col hidden lg:flex">
             <div className="p-4 border-b border-zinc-900">
               <h2 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Media Library</h2>
             </div>
@@ -3066,7 +3157,14 @@ return (
                 <h2 className="text-[9px] font-black text-zinc-500 uppercase mt-2">Import Media</h2>
               </div>
 
-
+              {/* RIGHT RESIZER HANDLE */}
+                <div 
+                  onMouseDown={() => {
+                    isResizingSidebar.current = true;
+                    document.body.style.cursor = 'col-resize';
+                  }}
+                  className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize z-[60] hover:bg-blue-500/40 transition-colors"
+                />
 
 
               {/* Search Bar Container */}
@@ -3113,7 +3211,7 @@ return (
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: index * 0.05 }}
-                        onClick={(e) => toggleAssetSelection(asset, e.shiftKey || e.ctrlKey)}
+                        onClick={(e) => {toggleAssetSelection(asset, e.shiftKey || e.ctrlKey); setSourceAsset(asset)}}
                         className={`group relative aspect-video bg-[#1a1a1a] rounded-lg overflow-hidden border border-white/5 hover:border-red-600/50 transition-colors cursor-pointer
                         ${selectedAssets.includes(asset) ? 'bg-red-500/10 border-red-500' : 'bg-[#151515] border-zinc-800 hover:border-zinc-600'}`}
                         draggable="true"
@@ -3196,6 +3294,135 @@ return (
             </div>
           </aside>
 
+<div id="twopreview" className="flex-1 flex overflow-hidden min-h-0 bg-[#050505]">
+
+
+  
+    {/* SOURCE MONITOR (Auxiliary) - Now properly aligned and centered */}
+      <section 
+      style={{ width: `${sourceWidth}px` }}
+      className="relative h-full w-72 border-r border-white/5 bg-[#080808] flex flex-col shrink-0"
+      onMouseEnter={() => {setIsMouseOverSource(true); isMouseOverRef.current = true;}}
+      onMouseLeave={() => {setIsMouseOverSource(false); isMouseOverRef.current = false;}}
+      >
+      <div 
+        className="flex flex-col gap-4 p-4 bg-zinc-900/60 rounded-2xl border border-white/5"
+        
+      >
+  {/* Canvas Monitor */}
+  <div className="relative aspect-video bg-black rounded-lg overflow-hidden border border-white/10 shadow-2xl">
+   
+
+    {sourceAsset ? (
+
+    <div>
+        <canvas
+          ref={canvasRef2}
+          width={1280}
+          height={720}
+          className="w-full h-full object-contain"
+        />
+        
+        <audio 
+          ref={audioRef2}
+          src={`http://127.0.0.1:1234${sourceAsset.path}.mp3`}
+          onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+          hidden
+        />
+
+    </div>
+      
+    ) : (
+      <div className="flex items-center justify-center h-full text-zinc-600 text-xs">
+        Select an asset to clip.
+      </div>
+    )}
+
+    {/* Overlay de Status */}
+    <div className="absolute bottom-4 left-4 flex items-center gap-2">
+       <div className={`w-2 h-2 rounded-full ${isPlaying2 ? 'bg-green-500 animate-pulse' : 'bg-zinc-600'}`} />
+       <span className="text-[10px] font-mono text-white/50 tracking-tighter">
+         {currentTime2.toFixed(3)}s
+       </span>
+    </div>
+  </div>
+
+  {/* Overlay de Drag and Drop */}
+    {sourceAsset && (
+      <div
+        draggable
+        onDragStart={(e) => {
+          const subClip = {
+            name: sourceAsset.name,
+            beginmoment: inPoint,
+            duration: outPoint - inPoint,
+            id: crypto.randomUUID() // Novo ID para o subclip
+          };
+          e.dataTransfer.setData("application/json", JSON.stringify(subClip));
+          
+        }}
+        className="absolute inset-0 cursor-grab active:cursor-grabbing flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/40 transition-opacity"
+      >
+        <div className="bg-white/10 p-2 rounded-full backdrop-blur-md">
+           <Plus size={24} className="text-white" />
+        </div>
+      </div>
+    )}
+
+  {/* Interação: Barra de Progresso e Marcadores I/O */}
+  <div className="space-y-4">
+    <div 
+      className="relative h-3 bg-white/5 rounded-full cursor-pointer overflow-hidden"
+      onClick={(e) => {
+        if (!audioRef2.current || !sourceAsset) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const percent = (e.clientX - rect.left) / rect.width;
+        const newTime = percent * (audioRef2.current.duration || 0);
+        
+        audioRef2.current.currentTime = newTime;
+        setCurrentTime2(newTime);
+        renderFrame2(newTime); // Renderiza o frame estático ao clicar
+      }}
+    >
+      {/* Marcador de Range (I -> O) */}
+      <div 
+        className="absolute h-full bg-indigo-500/30 border-x border-indigo-500/50"
+        style={{
+          left: `${(inPoint / (audioRef2.current?.duration || 1)) * 100}%`,
+          width: `${((outPoint - inPoint) / (audioRef2.current?.duration || 1)) * 100}%`
+        }}
+      />
+
+      {/* Playhead */}
+      <div 
+        className="absolute h-full w-0.5 bg-white z-20"
+        style={{ left: `${(currentTime2 / (audioRef2.current?.duration || 1)) * 100}%` }}
+      />
+    </div>
+
+    {/* Controles de Tempo */}
+    <div className="flex justify-between text-[10px] font-mono">
+       <div className="flex gap-4">
+          <span className="text-blue-400">IN: {inPoint.toFixed(2)}s</span>
+          <span className="text-red-400">OUT: {outPoint.toFixed(2)}s</span>
+       </div>
+       <span className="text-zinc-500 italic">Press I / O to Mark</span>
+    </div>
+  </div>
+</div>
+
+        {/* RIGHT RESIZER HANDLE */}
+  <div 
+    onMouseDown={(e) => {
+      isResizingSource.current = true;
+      document.body.style.cursor = 'col-resize';
+    }}
+    className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize z-[60] hover:bg-blue-500/40 transition-colors"
+  />
+      </section>
+
+
+
           {/* PREVIEW PLAYER */}
           <section className="flex-1 bg-black flex flex-col items-center justify-center p-8 relative">
             
@@ -3240,6 +3467,12 @@ return (
               <button className="text-zinc-600 hover:text-white transition-colors"><SkipForward size={24} fill="currentColor"/></button>
             </div>
           </section>
+
+
+
+</div>
+
+
         </main>
 
         {/* --- DYNAMIC TIMELINE SECTION --- */}
