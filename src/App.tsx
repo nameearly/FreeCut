@@ -55,7 +55,8 @@ import {
   Diamond,
   MicOffIcon,
   LockIcon,
-  EyeOff
+  EyeOff,
+  BrushCleaning
   
 } from 'lucide-react';
 
@@ -809,58 +810,41 @@ useEffect(() => {
 const lastFrameTimeRef = useRef<number>(0);
 const FPS_LIMIT = 1000 / 10; // 30 FPS (aprox 33ms)
 
-
-//Render main frame
-const drawFrame_old = async (time: number) => {
-    if (!canvasRef.current) return;
-
-
-    const now = performance.now();
-    if (now - lastFrameTimeRef.current < FPS_LIMIT) 
-      return;
-    lastFrameTimeRef.current = now;
-      
-    const ctx = canvasRef.current.getContext('2d');
-
-
-    if(!topClip)
-    {
-        if (ctx && canvasRef.current) {
-        ctx.fillStyle = "black";
-        ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-      }
-      return
-    }
-
-    // time in miliseconds
-    const clipTimeMs = ((time - topClip.start) + (topClip.beginmoment || 0)) * 1000;
-    const path = `${currentProjectPath}/videos/${topClip.name}`;
-
-//    console.log('current time', currentTime)
-  //  console.log('cliptimems', clipTimeMs)
-
-    try {
-      // call function in rust to generate frames
-      const frameBase64: string = await invoke('get_video_frame', { 
-        path, 
-        timeMs: clipTimeMs 
-      });
-
-      const img = new Image();
-      img.onload = () => {
-        if (canvasRef.current) {
-            canvasRef.current.width = img.width;
-            canvasRef.current.height = img.height;
-            ctx?.drawImage(img, 0, 0);
-        }
-      };
-      img.src = frameBase64;
-         
-    } catch (err) {
-      console.error("Erro ao buscar frame:", err);
-    }
+const getOpacityAtTime = (clip: Clip) => {
+  if (!clip.keyframes || !clip.keyframes.opacity || clip.keyframes.opacity.length === 0) {
+    return 1; // Opacidade total se não houver keyframes
   }
 
+  const kfs = [...clip.keyframes.opacity].sort((a, b) => a.time - b.time);
+  const relativeTime = (currentTime - clip.start) + (clip.beginmoment || 0);
+
+
+  console.log('relative time', relativeTime)
+
+  // Antes do primeiro keyframe
+  if (relativeTime <= kfs[0].time) return kfs[0].value;
+  // Depois do último keyframe
+  if (relativeTime >= kfs[kfs.length - 1].time) return kfs[kfs.length - 1].value;
+
+  // Encontrar os dois keyframes entre os quais o tempo atual está
+  for (let i = 0; i < kfs.length - 1; i++) {
+    const current = kfs[i];
+    const next = kfs[i + 1];
+
+    console.log('current.value', current.value)
+
+    if (relativeTime >= current.time && relativeTime <= next.time) {
+      const range = next.time - current.time;
+      const progress = (relativeTime - current.time) / range;
+      // Interpolação linear simples
+      return current.value + ((next.value - current.value) * progress);
+    }
+  }
+  return 1;
+};
+
+
+//Render main frame
 const drawFrame = async (time: number) => {
     if (!canvasRef.current) return;
 
@@ -897,6 +881,13 @@ const drawFrame = async (time: number) => {
 
     // Clamp para garantir que fique entre 0 e 1
     opacity = Math.max(0, Math.min(1, opacity));
+
+    //if has a keyframe the value are multiplied
+
+    opacity = getOpacityAtTime(topClip);
+
+    console.log('opacity', opacity)
+    console.log('clip now frame', topClip.keyframes?.opacity)
 
     // Tempo para o Rust (milissegundos)
     const clipTimeMs = (relativeTime + (topClip.beginmoment || 0)) * 1000;
@@ -4680,6 +4671,35 @@ return (
             >
               <X size={8} />
             </button>
+            <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              // Confirmação simples para evitar exclusão acidental
+              if(!confirm("Do you want to delete all keyframes for this property?")) return;
+
+              setClips(prev => prev.map(c => {
+                if (c.id === clip.id && c.activeKeyframeView) {
+                  // Criamos uma cópia segura dos keyframes
+                  const updatedKeyframes = { ...c.keyframes };
+                  
+                  // Limpamos apenas a propriedade que está sendo visualizada (volume, opacity, etc)
+                  // @ts-ignore - ou use o tipo correto da chave
+                  updatedKeyframes[c.activeKeyframeView] = []; 
+
+                  return { 
+                    ...c, 
+                    keyframes: updatedKeyframes,
+                    activeKeyframeView: null 
+                  };
+                }
+                return c;
+              }));
+            }}
+            className="bg-zinc-800 hover:bg-amber-600 text-white rounded-full p-0.5 transition-colors"
+            title="Limpar todos os keyframes desta propriedade"
+          >
+            <BrushCleaning size={8} />
+          </button>
             </div>
           )}
 

@@ -94,8 +94,8 @@ pub struct Clip {
     pub mute: Option<bool>,
     pub fadein: Option<f64>,
     pub fadeout: Option<f64>,
-    pub fadein_audio: Option<f64>, // Recomendado usar snake_case no Rust
-    pub fadeout_audio: Option<f64>,
+    pub fadeinAudio: Option<f64>, 
+    pub fadeoutAudio: Option<f64>,
     
     // Opcional: para suportar a nova estrutura de keyframes
     pub keyframes: Option<Keyframes>,
@@ -145,9 +145,28 @@ async fn export_video(
             //args.push((total_duration + 1.0).to_string());
         }
         
+
+
+        let is_image = path_lower.ends_with(".png") || path_lower.ends_with(".jpg") || path_lower.ends_with(".jpeg");
+
+        if is_image {
+            // ESSENCIAL: O loop deve vir ANTES do -i
+            args.push("-loop".to_string());
+            args.push("1".to_string());
+            
+            // Opcional mas recomendado: limite a leitura para não ler infinitamente
+            args.push("-t".to_string());
+            args.push(format!("{:.4}", clip.duration));
+        }
+
+
         args.push("-i".to_string());
         args.push(clip.path.clone());
+        
+        
     }
+
+
 
 
     args.extend([
@@ -238,10 +257,29 @@ pub fn build_rendering_filter(clips: &[Clip], total_duration: f64) -> String {
             let mut v_filters = Vec::new();
             
             if is_image {
-                filters.push(format!(
-                    "[{}:v]{},setpts=PTS-STARTPTS+{}/TB[v{}]",
-                    i, centering_filter, clip.start, i
-                ));
+
+                   // 1. Força o canal alpha para que o fade funcione
+    v_filters.push("format=yuva420p".to_string());
+
+    if let Some(fi) = clip.fadein {
+        if fi > 0.0 { 
+            v_filters.push(format!("fade=t=in:st=0:d={:.4}:alpha=1", fi)); 
+        }
+    }
+    if let Some(fo) = clip.fadeout {
+        if fo > 0.0 {
+            let st = clip.duration - fo;
+            v_filters.push(format!("fade=t=out:st={:.4}:d={:.4}:alpha=1", st, fo));
+        }
+    }
+
+    let v_effects = if v_filters.is_empty() { "".to_string() } else { format!(",{}", v_filters.join(",")) };
+
+    // Note o setpts: para imagens em loop, resetar o PTS para 0 é crucial
+    filters.push(format!(
+        "[{}:v]{}{},setpts=PTS-STARTPTS+{}/TB[v{}]",
+        i, centering_filter, v_effects, clip.start, i
+    ));
             } else {
                 // Fade In/Out de Vídeo (Opcional se não usar keyframes de opacidade ainda)
                 if let Some(fi) = clip.fadein {
@@ -266,35 +304,70 @@ pub fn build_rendering_filter(clips: &[Clip], total_duration: f64) -> String {
 
         // --- Processamento de Áudio com Keyframes ---
         if !is_image {
-    let delay_ms = (clip.start * 1000.0).round() as i64;
-    
-    let vol_kfs = clip.keyframes.as_ref()
-        .and_then(|k| k.volume.as_ref())
-        .map(|v| v.as_slice())
-        .unwrap_or(&[]);
+            let delay_ms = (clip.start * 1000.0).round() as i64;
+            
+            let vol_kfs = clip.keyframes.as_ref()
+                .and_then(|k| k.volume.as_ref())
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
 
-    let volume_expr = build_volume_expression(vol_kfs, clip.mute.unwrap_or(false));
+            let volume_expr = build_volume_expression(vol_kfs, clip.mute.unwrap_or(false));
 
-    let mut a_filters = Vec::new();
 
-    // 1. Primeiro cortamos o áudio original
-    a_filters.push(format!("atrim=start={:.4}:duration={:.4}", clip.beginmoment, clip.duration));
-    
-    // 2. Resetamos o PTS para que o áudio comece em 0 internamente
-    a_filters.push("asetpts=PTS-STARTPTS".to_string());
+            println!("--- Comando {} ---", volume_expr);
 
-    // 3. Aplicamos o volume (dinâmico por keyframes ou fixo)
-    a_filters.push(format!("volume=eval=frame:volume='{}'", volume_expr));
+            //if volume equal 1 is because there is no keyframes audio
 
-    // 4. Aplicamos o delay para posicionar na timeline
-    a_filters.push(format!("adelay={}|{}", delay_ms, delay_ms));
+            if volume_expr == "1"
+            {
 
-    // 5. Unimos os filtros e definimos a saída [aX]
-    let filter_string = a_filters.join(",");
-    filters.push(format!("[{}:a]{}[a{}]", i, filter_string, i));
-    
-    audio_outputs.push(format!("[a{}]", i));
-}
+                println!("São iguais!");
+                    let delay_ms = (clip.start * 1000.0).round() as i64;
+                    let volume = if clip.mute.unwrap_or(false) { "0" } else { "1" };
+                    
+                    let mut a_effects = Vec::new();
+                    if let Some(fi) = clip.fadeinAudio {
+                        if fi > 0.0 { a_effects.push(format!("afade=t=in:st=0:d={}", fi)); }
+                        
+                        println!("Fade in detect");
+                    }
+                    if let Some(fo) = clip.fadeoutAudio {
+                        if fo > 0.0 {
+                            a_effects.push(format!("afade=t=out:st={}:d={}", clip.duration - fo, fo));
+                        }
+                    }
+
+                    let a_effects_str = if a_effects.is_empty() { String::new() } else { format!(",{}", a_effects.join(",")) };
+
+                    filters.push(format!(
+                        "[{}:a]atrim=start={}:duration={},asetpts=PTS-STARTPTS,volume={}{},adelay={}|{},aresample=async=1[a{}]",
+                        i, clip.beginmoment, clip.duration, volume, a_effects_str, delay_ms, delay_ms, i
+                    ));
+                    audio_outputs.push(format!("[a{}]", i));
+            }
+            else
+            {
+
+                let mut a_filters = Vec::new();
+                 // 1. Primeiro cortamos o áudio original
+                a_filters.push(format!("atrim=start={:.4}:duration={:.4}", clip.beginmoment, clip.duration));
+                
+                // 2. Resetamos o PTS para que o áudio comece em 0 internamente
+                a_filters.push("asetpts=PTS-STARTPTS".to_string());
+
+                // 3. Aplicamos o volume (dinâmico por keyframes ou fixo)
+                a_filters.push(format!("volume=eval=frame:volume='{}'", volume_expr));
+
+                // 4. Aplicamos o delay para posicionar na timeline
+                a_filters.push(format!("adelay={}|{}", delay_ms, delay_ms));
+
+                // 5. Unimos os filtros e definimos a saída [aX]
+                let filter_string = a_filters.join(",");
+                filters.push(format!("[{}:a]{}[a{}]", i, filter_string, i));
+                
+                audio_outputs.push(format!("[a{}]", i));
+            }
+        }
     }
 
     // --- Composição Final ---
@@ -385,6 +458,57 @@ fn build_volume_expression(keyframes: &[Keyframe], mute: bool) -> String {
 
     expr
 }
+
+
+
+//if(lt(t,2.4556),pow(10,(45.6522)/20),if(between(t,2.4556,3.3333),pow(10,((45.6522)+((-32.6087)-(45.6522))*(t-(2.4556))/((3.3333)-(2.4556)))/20),if(between(t,3.3333,4.2778),pow(10,((-32.6087)+((0.0000)-(-32.6087))*(t-(3.3333))/((4.2778)-(3.3333)))/20),pow(10,(0.0000)/20))))
+//
+
+pub fn generate_ffmpeg_expression(keyframes: &[Keyframe]) -> String {
+    if keyframes.is_empty() { return "1".to_string(); }
+
+    // Criamos uma cópia local para ordenar sem "roubar" o Vec do usuário
+    let mut sorted_keys = keyframes.to_vec(); 
+    sorted_keys.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+
+    // 2. Função recursiva para montar os ifs aninhados
+    fn build_expression(keys: &[Keyframe], index: usize) -> String {
+        let current = &keys[index];
+
+        // Se for o último keyframe, mantemos o valor dele para o resto do vídeo
+        if index == keys.len() - 1 {
+            return format!("{:.3}", current.value);
+        }
+
+        let next = &keys[index + 1];
+        
+        // Cálculo da interpolação linear entre o ponto atual e o próximo:
+        // Valor = ValorInicial + (TempoAtual - TempoInicial) * (VariaçãoValor / VariaçãoTempo)
+        let delta_val = next.value - current.value;
+        let delta_time = next.time - current.time;
+        
+        let lerp = if delta_time == 0.0 {
+            format!("{:.3}", next.value)
+        } else {
+            format!("{:.3}+(t-{:.3})*({:.3}/{:.3})", current.value, current.time, delta_val, delta_time)
+        };
+
+        // if(t < tempo_do_proximo, interpola, recursão_para_proximos)
+        format!("if(lt(t,{:.3}),{},{})", next.time, lerp, build_expression(keys, index + 1))
+    }
+
+    // Se o primeiro keyframe não começar em 0s, definimos o valor inicial até lá
+    if sorted_keys[0].time > 0.0 {
+        format!("if(lt(t,{:.3}),{:.3},{})", 
+            sorted_keys[0].time, 
+            sorted_keys[0].value, 
+            build_expression(&sorted_keys, 0)
+        )
+    } else {
+        build_expression(&sorted_keys, 0)
+    }
+}
+
 
 #[tauri::command]
 async fn cancel_export(state: State<'_, ExportState>) -> Result<(), String> {
@@ -867,7 +991,7 @@ fn copy_file(source: String, destination: String) -> Result<String, String> {
     let src_path = Path::new(&source);
     let dest_path = Path::new(&destination);
 
-    println!("--- Comando {} ---", source);
+    
 
     // Validate if the source exists before attempting to copy
     if !src_path.exists() {
