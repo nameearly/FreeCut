@@ -3908,7 +3908,47 @@ const PropertiesAside = () => {
 // sync anothers keyframes to the speed keyframes
 
 const syncKeyframesToSpeedCurve = (clip: Clip) => {
-  if (!clip.keyframes?.speed || clip.keyframes.speed.length === 0) return;
+  if (!clip.keyframes?.speed) return;
+
+  // --- CASO: KEYFRAMES DE SPEED FORAM EXCLUÍDOS ---
+  if (clip.keyframes.speed.length === 0) {
+    setClips((prevClips) =>
+      prevClips.map((c) => {
+        if (c.id === clip.id) {
+          const updatedKfs = { ...c.keyframes };
+          const typesToRemap: (keyof NonNullable<Clip['keyframes']>)[] = ['volume', 'opacity', 'rotation3d'];
+
+          typesToRemap.forEach((type) => {
+            if (updatedKfs[type]) {
+              updatedKfs[type] = updatedKfs[type]!.map((kf) => {
+                /**
+                 * LÓGICA DE RESET:
+                 * Se a velocidade agora é constante (1.0x), o tempo na timeline
+                 * deve ser exatamente o "Asset Time" que o keyframe representava.
+                 * Usamos a proporção baseada na duração que o clipe tinha antes de resetar.
+                 */
+                const ratio = kf.time / (c.duration || 1);
+                const resetTime = ratio * (c.originalduration || c.maxduration || c.duration);
+
+                return {
+                  ...kf,
+                  time: resetTime
+                };
+              });
+            }
+          });
+
+          return { 
+            ...c, 
+            duration: c.originalduration || c.maxduration || c.duration,
+            keyframes: updatedKfs 
+          };
+        }
+        return c;
+      })
+    );
+    return;
+  }
 
   const speedKfs = [...clip.keyframes.speed].sort((a, b) => a.time - b.time);
 
@@ -3960,6 +4000,100 @@ const syncKeyframesToSpeedCurve = (clip: Clip) => {
   );
 };
 
+const syncKeyframesToSpeedCurve_new = (clip: Clip) => {
+  // --- CASO: KEYFRAMES DE SPEED FORAM EXCLUÍDOS ---
+  if (!clip.keyframes?.speed || clip.keyframes.speed.length === 0) {
+    setClips((prevClips) =>
+      prevClips.map((c) => {
+        if (c.id === clip.id) {
+          const updatedKfs = { ...c.keyframes };
+          const typesToRemap: (keyof NonNullable<Clip['keyframes']>)[] = ['volume', 'opacity', 'rotation3d'];
+
+          typesToRemap.forEach((type) => {
+            if (updatedKfs[type]) {
+              updatedKfs[type] = updatedKfs[type]!.map((kf) => {
+                /**
+                 * LÓGICA DE RESET:
+                 * Se a velocidade agora é constante (1.0x), o tempo na timeline
+                 * deve ser exatamente o "Asset Time" que o keyframe representava.
+                 * Usamos a proporção baseada na duração que o clipe tinha antes de resetar.
+                 */
+                const ratio = kf.time / (c.duration || 1);
+                const resetTime = ratio * (c.originalduration || c.maxduration || c.duration);
+
+                return {
+                  ...kf,
+                  time: resetTime
+                };
+              });
+            }
+          });
+
+          return { 
+            ...c, 
+            duration: c.originalduration || c.maxduration || c.duration,
+            keyframes: updatedKfs 
+          };
+        }
+        return c;
+      })
+    );
+    return;
+  }
+
+  // --- CASO: EXISTEM KEYFRAMES DE SPEED (Sua lógica atual) ---
+  const speedKfs = [...clip.keyframes.speed].sort((a, b) => a.time - b.time);
+
+  const mapAssetTimeToTimeline = (targetAssetTime: number): number => {
+    let currentAssetTime = 0;
+    let currentTimelineTime = 0;
+
+    for (let i = 0; i < speedKfs.length - 1; i++) {
+      const start = speedKfs[i];
+      const end = speedKfs[i + 1];
+      const segmentTimelineDuration = end.time - start.time;
+      const avgSpeed = (start.value + end.value) / 2;
+      const segmentAssetDuration = segmentTimelineDuration * avgSpeed;
+
+      if (currentAssetTime + segmentAssetDuration >= targetAssetTime) {
+        const remainingAssetTime = targetAssetTime - currentAssetTime;
+        return currentTimelineTime + (remainingAssetTime / avgSpeed);
+      }
+      currentAssetTime += segmentAssetDuration;
+      currentTimelineTime += segmentTimelineDuration;
+    }
+    const lastSpeed = speedKfs[speedKfs.length - 1].value;
+    return currentTimelineTime + (targetAssetTime - currentAssetTime) / lastSpeed;
+  };
+
+  setClips((prevClips) =>
+    prevClips.map((c) => {
+      if (c.id === clip.id) {
+        const updatedKfs = { ...c.keyframes };
+        const typesToRemap: (keyof NonNullable<Clip['keyframes']>)[] = ['volume', 'opacity', 'rotation3d'];
+
+        typesToRemap.forEach((type) => {
+          if (updatedKfs[type]) {
+            updatedKfs[type] = updatedKfs[type]!.map((kf) => {
+                // Aqui você deve usar o cálculo de Asset Time que discutimos antes 
+                // para evitar que os pontos fiquem "presos"
+                const ratio = kf.time / (c.duration || 1);
+                const assetTime = ratio * (c.originalduration || c.maxduration);
+                
+                return {
+                  ...kf,
+                  time: mapAssetTimeToTimeline(assetTime), 
+                }
+            });
+          }
+        });
+
+        return { ...c, keyframes: updatedKfs };
+      }
+      return c;
+    })
+  );
+};
 
 
 const updateClipDurationBySpeed = (clip: Clip) => {
@@ -4035,80 +4169,206 @@ const reverterSpeed = (realSpeed: number): number => {
 
 
 const relocateSpeedKeyframes = (clip: Clip) => {
-  if (!clip.keyframes?.speed || clip.keyframes.speed.length <= 1) return;
+  if (!clip.keyframes?.speed) return;
 
-  // 1. Pegamos a versão estável antes da mudança (Histórico)
-  const lastStableState = history[history.length - 1];
-  const oldClip = lastStableState?.clips.find(c => c.id === clip.id);
-  
-  if (!oldClip || !oldClip.keyframes?.speed) return;
+  // --- CASO: KEYFRAMES DE SPEED FORAM EXCLUÍDOS ---
+  if (clip.keyframes.speed.length === 0) {
+    setClips((prevClips) =>
+      prevClips.map((c) => {
+        if (c.id === clip.id) {
+          const updatedKfs = { ...c.keyframes };
+          const typesToRemap: (keyof NonNullable<Clip['keyframes']>)[] = ['speed'];
 
-  const oldSpeedKfs = [...oldClip.keyframes.speed].sort((a, b) => a.time - b.time);
-  const currentSpeedKfs = [...clip.keyframes.speed].sort((a, b) => a.time - b.time);
+          typesToRemap.forEach((type) => {
+            if (updatedKfs[type]) {
+              updatedKfs[type] = updatedKfs[type]!.map((kf) => {
+                /**
+                 * LÓGICA DE RESET:
+                 * Se a velocidade agora é constante (1.0x), o tempo na timeline
+                 * deve ser exatamente o "Asset Time" que o keyframe representava.
+                 * Usamos a proporção baseada na duração que o clipe tinha antes de resetar.
+                 */
+                const ratio = kf.time / (c.duration || 1);
+                const resetTime = ratio * (c.originalduration || c.maxduration || c.duration);
 
-  // 2. Criamos o novo array de keyframes
-  const updatedSpeedKfs: Keyframe[] = [];
-  
-  // O primeiro ponto sempre fica no tempo 0 (início do clip)
-  updatedSpeedKfs.push({ ...currentSpeedKfs[0], time: 0 });
+                return {
+                  ...kf,
+                  time: resetTime
+                };
+              });
+            }
+          });
 
-  let accumulatedTimelineTime = 0;
-
-  for (let i = 1; i < currentSpeedKfs.length; i++) {
-    const currentKf = currentSpeedKfs[i];
-    
-    // Encontramos o correspondente no clipe antigo para saber o "Asset Time" original
-    const oldKf = oldSpeedKfs.find(k => k.id === currentKf.id) || oldSpeedKfs[i];
-    const prevOldKf = oldSpeedKfs[i - 1];
-
-    if (oldKf && prevOldKf) {
-      // A) Calculamos quanto "vídeo real" havia entre esses dois pontos no clipe antigo
-      const oldSegmentDuration = oldKf.time - prevOldKf.time;
-      const oldAvgSpeed = (oldKf.value + prevOldKf.value) / 2;
-      const assetDistance = oldSegmentDuration * oldAvgSpeed;
-
-      // B) Agora calculamos onde esse "Asset Distance" termina na nova escala de tempo
-      // A nova velocidade média deste segmento (usando os valores atuais do slider)
-      const prevNewKf = updatedSpeedKfs[i - 1];
-      const newAvgSpeed = (currentKf.value + prevNewKf.value) / 2;
-
-      // Tempo na timeline = Distância do Vídeo / Velocidade
-      const newSegmentDuration = assetDistance / newAvgSpeed;
-      
-      accumulatedTimelineTime += newSegmentDuration;
-
-      updatedSpeedKfs.push({
-        ...currentKf,
-        time: accumulatedTimelineTime
-      });
-    } else {
-      // Fallback caso seja um ponto novo
-      updatedSpeedKfs.push(currentKf);
-    }
+          return { 
+            ...c, 
+            duration: c.originalduration || c.maxduration || c.duration,
+            keyframes: updatedKfs 
+          };
+        }
+        return c;
+      })
+    );
+    return;
   }
 
-  // 3. Atualizamos os clips garantindo que nenhum ponto ultrapasse a nova duração
-  setClips(prev => prev.map(c => {
-    if (c.id === clip.id) {
-      return {
-        ...c,
-        keyframes: {
-          ...c.keyframes,
-          speed: updatedSpeedKfs
-        }
-      };
+  const speedKfs = [...clip.keyframes.speed].sort((a, b) => a.time - b.time);
+
+  // Esta lógica converte o "Tempo do Arquivo Original" para "Tempo na Timeline"
+  const mapAssetTimeToTimeline = (targetAssetTime: number): number => {
+    let currentAssetTime = 0;
+    let currentTimelineTime = 0;
+
+    for (let i = 0; i < speedKfs.length - 1; i++) {
+      const start = speedKfs[i];
+      const end = speedKfs[i + 1];
+      const segmentTimelineDuration = end.time - start.time;
+      const avgSpeed = (start.value + end.value) / 2;
+      const segmentAssetDuration = segmentTimelineDuration * avgSpeed;
+
+      if (currentAssetTime + segmentAssetDuration >= targetAssetTime) {
+        const remainingAssetTime = targetAssetTime - currentAssetTime;
+        return currentTimelineTime + (remainingAssetTime / avgSpeed);
+      }
+      currentAssetTime += segmentAssetDuration;
+      currentTimelineTime += segmentTimelineDuration;
     }
-    return c;
-  }));
+    const lastSpeed = speedKfs[speedKfs.length - 1].value;
+    return currentTimelineTime + (targetAssetTime - currentAssetTime) / lastSpeed;
+  };
+
+  setClips((prevClips) =>
+    prevClips.map((c) => {
+      if (c.id === clip.id) {
+        const updatedKfs = { ...c.keyframes };
+        const typesToRemap: (keyof NonNullable<Clip['keyframes']>)[] = ['volume', 'opacity', 'rotation3d'];
+
+        typesToRemap.forEach((type) => {
+          if (updatedKfs[type]) {
+            // ATENÇÃO: Se você tiver c.originalKeyframes[type], use ele aqui
+            // para evitar erro cumulativo de ponto flutuante.
+            updatedKfs[type] = updatedKfs[type]!.map((kf) => ({
+              ...kf,
+              // O kf.time aqui é tratado como a posição fixa no arquivo original
+              time: mapAssetTimeToTimeline(kf.time), 
+            }));
+          }
+        });
+
+        return { ...c, keyframes: updatedKfs };
+      }
+      return c;
+    })
+  );
 };
 
 
 
-const handleSpeedKeyframeChange = (clip: Clip) => {
 
-  relocateSpeedKeyframes(clip)
-  updateClipDurationBySpeed(clip);
-  syncKeyframesToSpeedCurve(clip);
+const relocateSpeedKeyframes_old = (clip: Clip) => {
+  if (!clip.keyframes?.speed || clip.keyframes.speed.length === 0) return;
+
+  const speedKfs = [...clip.keyframes.speed].sort((a, b) => a.time - b.time);
+
+  // 1. Função para converter tempo da Timeline -> Asset (O quanto de vídeo já "passou")
+  const getAssetTimeFromTimeline = (tTime: number, kfs: Keyframe[]): number => {
+    let aTime = 0;
+    let lastT = 0;
+    let lastS = kfs[0].value;
+
+    for (let i = 0; i < kfs.length; i++) {
+      const kf = kfs[i];
+      if (tTime > kf.time) {
+        const dt = kf.time - lastT;
+        const avgS = (lastS + kf.value) / 2;
+        aTime += dt * avgS;
+        lastT = kf.time;
+        lastS = kf.value;
+      } else {
+        const dt = tTime - lastT;
+        const dist = kf.time - lastT || 1;
+        const currentS = lastS + (dt / dist) * (kf.value - lastS);
+        aTime += dt * ((lastS + currentS) / 2);
+        return aTime;
+      }
+    }
+    return aTime + (tTime - lastT) * lastS;
+  };
+
+  // 2. Função para converter Asset -> Nova Timeline (Onde o ponto deve estacionar)
+  const getTimelineFromAssetTime = (aTime: number, kfs: Keyframe[]): number => {
+    let currentA = 0;
+    let currentT = 0;
+    for (let i = 0; i < kfs.length - 1; i++) {
+      const start = kfs[i];
+      const end = kfs[i + 1];
+      const dt = end.time - start.time;
+      const avgS = (start.value + end.value) / 2;
+      const da = dt * avgS;
+
+      if (currentA + da >= aTime) {
+        return currentT + (aTime - currentA) / avgS;
+      }
+      currentA += da;
+      currentT += dt;
+    }
+    const lastS = kfs[kfs.length - 1].value;
+    return currentT + (aTime - currentA) / lastS;
+  };
+
+  setClips((prevClips) =>
+    prevClips.map((c) => {
+      if (c.id === clip.id) {
+        const updatedKfs = { ...c.keyframes };
+        const types: (keyof NonNullable<Clip['keyframes']>)[] = ['speed'];
+
+        types.forEach((type) => {
+          if (updatedKfs[type]) {
+            updatedKfs[type] = updatedKfs[type]!.map((kf) => {
+              // PASSO CRUCIAL:
+              // Em vez de usar ratio (estático), usamos a integral.
+              // "Em qual frame do vídeo original este keyframe estava?"
+              const assetTime = getAssetTimeFromTimeline(kf.time, speedKfs);
+              
+              // "Com a nova curva, onde esse frame original cai na timeline?"
+              const newTime = getTimelineFromAssetTime(assetTime, speedKfs);
+
+              // Evita micro-loops de atualização do React
+              if (Math.abs(kf.time - newTime) < 0.001) return kf;
+
+              return { ...kf, time: newTime };
+            });
+          }
+        });
+
+        return { ...c, keyframes: updatedKfs };
+      }
+      return c;
+    })
+  );
+};
+
+
+
+const isSyncingRef = useRef(false);
+
+const handleSpeedKeyframeChange = (clip: Clip) => {
+  // Se já estamos sincronizando, ignora para não entrar em loop
+  if (isSyncingRef.current) return;
+
+  isSyncingRef.current = true;
+
+  try {
+    // A ordem correta para garantir a consistência
+    updateClipDurationBySpeed(clip);
+    syncKeyframesToSpeedCurve(clip);
+    relocateSpeedKeyframes(clip);
+  } finally {
+    // Usa um pequeno delay para garantir que o ciclo de renderização 
+    // do React processou as mudanças antes de liberar a trava
+    setTimeout(() => {
+      isSyncingRef.current = false;
+    }, 100);
+  }
 };
 
 useEffect(() => {
@@ -4121,6 +4381,7 @@ useEffect(() => {
 
 }, [JSON.stringify(clips.find(c => c.id === selectedClipIds[0])?.keyframes?.speed)]);
 
+//JSON.stringify(clips.find(c => c.id === selectedClipIds[0])?.keyframes?.speed)
 //Keyframes System
 
 
