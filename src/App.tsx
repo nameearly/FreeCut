@@ -95,6 +95,7 @@ interface Clip {
   maxduration: number; // max size in the timeline at current position
   beginmoment: number; //begin of the clip in relation of all original clip (asset)
   originalduration: number;
+  blendmode?: 'normal' | 'overlay' | 'screen' | 'multiply' | 'lineardodge' | null;
   mute?: boolean;
   fadein?: number;
   fadeout?: number;
@@ -316,7 +317,7 @@ const [isPlaying, setIsPlaying] = useState(false);
 const requestRef = useRef <number>(); // for loop animation loop of high precision
 const lastTimeRef = useRef<number | null>(null);
 
-const [topClip, setTopClip] = useState<Clip | null>(null);
+const [topClips, setTopClips] = useState<Clip [] | null>(null);
 const [topAudios, setTopAudios] = useState<Clip [] | null>(null);
 
 
@@ -583,7 +584,7 @@ const updatePreview = (currentTime: number) => {
 
   if (currentClips.length == 0)
   {
-    setTopClip(null)
+    setTopClips(null)
     return
   }  
       
@@ -603,8 +604,8 @@ const updatePreview = (currentTime: number) => {
 
 
   // 3. Set the winner
-  const winner = sortedClips[0] || null;
-  setTopClip(winner);
+  //const winner = sortedClips[0] || null;
+  setTopClips(sortedClips);
 
   
 
@@ -698,6 +699,134 @@ const audioPlayersRef = useRef<Map<string, HTMLAudioElement>>(new Map());
 
 //Render all audios of the current time
 
+
+useEffect(() => {
+  if (!topAudios || topAudios.length === 0 || !isPlaying) {
+    audioPlayersRef.current.forEach(p => {
+      p.pause();
+      p.volume = 0;
+    });
+    return;
+  }
+
+  const currentIds = new Set(topAudios.map(clip => clip.id));
+  audioPlayersRef.current.forEach((player, id) => {
+    if (!currentIds.has(id)) {
+      player.pause();
+      audioPlayersRef.current.delete(id);
+    }
+  });
+
+  const keyframeToLinear = (kfValue: number) => {
+    const db = (kfValue * 100) - 50;
+    return Math.pow(10, db / 20);
+  };
+
+  // Função Auxiliar: Calcula em qual segundo do arquivo original o áudio deve estar
+  const getAssetTimeAtTimelineTime = (tTime: number, clip: Clip) => {
+    if (!clip.keyframes?.speed || clip.keyframes.speed.length === 0) return tTime;
+    const speedKfs = [...clip.keyframes.speed].sort((a, b) => a.time - b.time);
+    let accumulatedAssetTime = 0;
+    let lastT = 0;
+    let lastS = speedKfs[0].value;
+
+    for (const kf of speedKfs) {
+      if (tTime > kf.time) {
+        const dt = kf.time - lastT;
+        const avgS = (lastS + kf.value) / 2;
+        accumulatedAssetTime += dt * avgS;
+        lastT = kf.time;
+        lastS = kf.value;
+      } else {
+        const dt = tTime - lastT;
+        const dist = kf.time - lastT || 1;
+        const currentS = lastS + (dt / dist) * (kf.value - lastS);
+        accumulatedAssetTime += dt * ((lastS + currentS) / 2);
+        return accumulatedAssetTime;
+      }
+    }
+    return accumulatedAssetTime + (tTime - lastT) * lastS;
+  };
+
+  topAudios.forEach(clip => {
+    let player = audioPlayersRef.current.get(clip.id);
+    
+    const audio = `${clip.name.split('.').slice(0, -1).join('.')}.mp3`;
+    const path = knowTypeByAssetName(clip.name) === 'video' 
+      ? `http://127.0.0.1:1234/${encodeURIComponent(`${currentProjectPath}/extracted_audios/${audio}`)}` 
+      : `http://127.0.0.1:1234/${encodeURIComponent(`${currentProjectPath}/videos/${clip.name}`)}`;
+
+    if (!player) {
+      player = new Audio(path);
+      // Opcional: mantém o tom original (sem voz de esquilo) ao mudar velocidade
+      // player.preservesPitch = true; 
+      audioPlayersRef.current.set(clip.id, player);
+    }
+
+    const timelineRelativeTime = currentTimeRef.current - clip.start;
+    // Calcula o tempo distorcido pela velocidade para o áudio original
+    const assetRelativeTime = getAssetTimeAtTimelineTime(timelineRelativeTime, clip);
+    const targetTime = assetRelativeTime + (clip.beginmoment || 0);
+
+    const applyFadeAndSync = () => {
+      // Sincronia inicial
+      if (targetTime >= 0 && targetTime < player!.duration) {
+        player!.currentTime = targetTime;
+      }
+      
+      if (isPlaying) player!.play().catch(() => {});
+
+      const updateAudioState = () => {
+        if (!player || player.paused) return;
+
+        // 1. SPEED UPDATE (PlaybackRate)
+        const currentSpeed = getInterpolatedValueWithFades(currentTimeRef.current, clip, 'speed');
+        // O HTML5 Audio suporta playbackRate entre 0.06 e 16.0
+        player.playbackRate = Math.max(0.06, Math.min(16, currentSpeed));
+
+        //2. VOLUME CALCULATION
+        const relativeTime = player.currentTime - (clip.beginmoment || 0);
+        const fadein = clip.fadeinAudio || 0;
+        const fadeout = clip.fadeoutAudio || 0;
+        
+        let fadeVol = 1.0;
+        if (relativeTime < fadein && fadein > 0) {
+          fadeVol = relativeTime / fadein;
+        } else if (relativeTime > (clip.duration - fadeout) && fadeout > 0) {
+          const timeRemaining = clip.duration - relativeTime;
+          fadeVol = timeRemaining / fadeout;
+        }
+
+        const kfValue = getInterpolatedValueWithFades(currentTimeRef.current, clip, 'volume');
+        const kfLinear = keyframeToLinear(kfValue);
+        player.volume = Math.max(0, Math.min(1, kfLinear * fadeVol));
+
+      // 3. DRIFT CHECK (Forced Sync)
+      // If the audio deviates by more than 0.1s from what the integral calculates, we force the timing.
+      
+      const expectedTime = getAssetTimeAtTimelineTime(currentTimeRef.current - clip.start, clip) + (clip.beginmoment || 0);
+        if (Math.abs(player.currentTime - expectedTime) > 0.1) {
+           player.currentTime = expectedTime;
+        }
+        
+        if (isPlaying) requestAnimationFrame(updateAudioState);
+      };
+
+      updateAudioState();
+    };
+
+    if (player.readyState >= 1) { 
+      applyFadeAndSync();
+    } else {
+      player.addEventListener('loadedmetadata', applyFadeAndSync, { once: true });
+    }
+  });
+
+}, [topAudios, isPlaying]);
+
+
+
+/*
 useEffect(() => {
   if (!topAudios || topAudios.length === 0 || !isPlaying) {
     audioPlayersRef.current.forEach(p => {
@@ -788,7 +917,7 @@ useEffect(() => {
 
 }, [topAudios, isPlaying]);
 
-
+*/
 
 const getInterpolatedValue = (time: number, keyframes: Keyframe[]): number => {
   // 1. Se não houver keyframes, retorna o valor padrão (meio da escala = 0dB)
@@ -830,7 +959,7 @@ const getInterpolatedValue = (time: number, keyframes: Keyframe[]): number => {
 const getInterpolatedValueWithFades = (
   timeFull: number, 
   clip: any, 
-  type: 'opacity' | 'volume' | 'speed'
+  type: 'opacity' | 'volume' | 'speed' | 'zoom'
 ): number => {
   // 1. Identificar quais campos de fade usar baseado no tipo
   const isVideo = type === 'opacity';
@@ -867,7 +996,7 @@ const getInterpolatedValueWithFades = (
     }
   } else {
     // Se não houver keyframes, o padrão costuma ser 1.0 (total) ou 0.5 conforme seu código
-    baseValue = 0.5; 
+    baseValue = 1; 
   }
 
   // 3. Aplicar Modificadores de Fade
@@ -943,13 +1072,15 @@ const drawFrame = async (time: number) => {
       
     const ctx = canvasRef.current.getContext('2d');
 
-    if (!topClip) {
+    if (!topClips) {
         if (ctx && canvasRef.current) {
             ctx.fillStyle = "black";
             ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
         }
         return;
     }
+
+    const topClip = topClips[0]
 
     // 1. TEMPO RELATIVO NA TIMELINE
     const timelineRelativeTime = time - topClip.start;
@@ -3708,7 +3839,20 @@ const PropertiesAside = () => {
                   <input type="number" className="bg-white/5 border border-white/5 rounded px-2 py-1 text-[10px] text-white outline-none focus:border-white/20" />
                 </PropertyRow>
               </div>
-              <PropertyRow label="Zoom" activeColor={activeHex}>
+             
+             
+             <PropertyRow 
+              label={
+                <div className="flex justify-between items-center w-full pr-2">
+                  <span> Zoom </span>
+                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/5 border border-white/10 ml-10" style={{ color: activeHex }}>
+                    {(getInterpolatedValueWithFades(currentTimeRef.current, selectedClip, 'zoom') * 100).toFixed(0)}%
+                  </span>
+                </div>
+              } 
+              activeColor={activeHex} 
+              keyframeNow={volumeKeyframeNow}
+            >
                 <input 
                   type="range" 
                   className="w-full cursor-pointer" 
@@ -3733,56 +3877,92 @@ const PropertiesAside = () => {
             </>
           )}
 
-          {(isAudio || isVideo) && (
-            <PropertyRow label="Volume" activeColor={activeHex} keyframeNow={volumeKeyframeNow}>
-              <input 
-                type="range"
-                step="0.001" 
-                className="w-full cursor-pointer" 
-                style={{ accentColor: activeHex }}
-                onInput ={ (e) =>  {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    updateKeyframes(selectedClip, 'volume', e.target.value)
-                  }} 
-                min={0}
-                max={1}
-                value={getInterpolatedValueWithFades(currentTimeRef.current, selectedClip, 'volume')}
-              />
-            </PropertyRow>
-          )}
 
-          {(isVideo || isText) && (
-            <PropertyRow label="Opacity" activeColor={activeHex} keyframeNow={opacityKeyframeNow}>
-              <input 
-                type="range" 
-                 step="0.001"
-                className="w-full cursor-pointer border-gray-300" 
-                style={{ accentColor: activeHex }} 
-                onInput ={ (e) => 
-                  {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    updateKeyframes(selectedClip, 'opacity', e.target.value)
-                  }} 
-                min={0}
-                max={1}
-                value={getInterpolatedValueWithFades(currentTimeRef.current, selectedClip, 'opacity')}
+      {/* VOLUME */}
+      {(isAudio || isVideo) && (
+        <PropertyRow 
+          label={
+            <div className="flex justify-between items-center w-full pr-2">
+              <span>Volume</span>
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/5 border border-white/10 ml-10" style={{ color: activeHex }}>
+                {(getInterpolatedValueWithFades(currentTimeRef.current, selectedClip, 'volume') * 100).toFixed(0)}%
+              </span>
+            </div>
+          } 
+          activeColor={activeHex} 
+          keyframeNow={volumeKeyframeNow}
+        >
+          <input 
+            type="range"
+            step="0.001" 
+            className="w-full cursor-pointer" 
+            style={{ accentColor: activeHex }}
+            onInput={(e) => {
+              e.preventDefault(); e.stopPropagation();
+              updateKeyframes(selectedClip, 'volume', (e.target as HTMLInputElement).value)
+            }} 
+            min={0} max={1}
+            value={getInterpolatedValueWithFades(currentTimeRef.current, selectedClip, 'volume')}
+          />
+        </PropertyRow>
+      )}
 
-              />
-            </PropertyRow>
-          )}
-          
-          <PropertyRow label="Speed" activeColor={activeHex} keyframeNow={speedKeyframeNow}>
-            <input type="range" step="0.1" min={0.2} max={20}  className="bg-white/5 border 
-            border-white/5 rounded px-2 py-1 text-[10px] text-white w-full outline-none focus:border-white/20"
-            onInput ={ (e) =>  {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    updateKeyframes(selectedClip, 'speed', e.target.value)
-              }}
-            value = {getInterpolatedValueWithFades(currentTimeRef.current, selectedClip, 'speed')}/>
-          </PropertyRow>
+      {/* OPACITY */}
+      {(isVideo || isText) && (
+        <PropertyRow 
+          label={
+            <div className="flex justify-between items-center w-full pr-2">
+              <span>Opacity</span>
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/5 border border-white/10 ml-10" style={{ color: activeHex }}>
+                {(getInterpolatedValueWithFades(currentTimeRef.current, selectedClip, 'opacity') * 100).toFixed(0)}%
+              </span>
+            </div>
+          } 
+          activeColor={activeHex} 
+          keyframeNow={opacityKeyframeNow}
+        >
+          <input 
+            type="range" 
+            step="0.001"
+            className="w-full cursor-pointer" 
+            style={{ accentColor: activeHex }} 
+            onInput={(e) => {
+              e.preventDefault(); e.stopPropagation();
+              updateKeyframes(selectedClip, 'opacity', (e.target as HTMLInputElement).value)
+            }} 
+            min={0} max={1}
+            value={getInterpolatedValueWithFades(currentTimeRef.current, selectedClip, 'opacity')}
+          />
+        </PropertyRow>
+      )}
+      
+      {/* SPEED */}
+      <PropertyRow 
+        label={
+          <div className="flex justify-between items-center w-full pr-2">
+            <span>Speed</span>
+            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/5 border border-white/10 ml-10" style={{ color: activeHex }}>
+              {getInterpolatedValueWithFades(currentTimeRef.current, selectedClip, 'speed').toFixed(2)}x
+            </span>
+          </div>
+        } 
+        activeColor={activeHex} 
+        keyframeNow={speedKeyframeNow}
+      >
+        <input 
+          type="range" 
+          step="0.1" 
+          min={0.2} 
+          max={20}  
+          className="w-full cursor-pointer"
+          style={{ accentColor: activeHex }}
+          onInput={(e) => {
+            e.preventDefault(); e.stopPropagation();
+            updateKeyframes(selectedClip, 'speed', (e.target as HTMLInputElement).value)
+          }}
+          value={getInterpolatedValueWithFades(currentTimeRef.current, selectedClip, 'speed')}
+        />
+      </PropertyRow>
 
           {(isVideo || isText) && (
             <div className="grid grid-cols-2 gap-2 mt-2">
@@ -4382,9 +4562,50 @@ useEffect(() => {
 }, [JSON.stringify(clips.find(c => c.id === selectedClipIds[0])?.keyframes?.speed)]);
 
 //JSON.stringify(clips.find(c => c.id === selectedClipIds[0])?.keyframes?.speed)
+
+
+
+
+
+
 //Keyframes System
 
+const [hoverKeyframe, setHoverKeyframe] = useState<{
+  x: number;
+  y: number;
+  value: string;
+  visible: boolean;
+} | null>(null);
 
+const handleClipMouseMove = (e: React.MouseEvent, clip: Clip) => {
+  if (!clip.activeKeyframeView) return;
+
+  const rect = e.currentTarget.getBoundingClientRect();
+  const clickY = e.clientY - rect.top;
+  
+  // Valor visual (0 a 1)
+  let value = Math.max(0, Math.min(1, 1 - (clickY / rect.height)));
+  let displayValue = "";
+
+  // Formatação baseada no tipo de keyframe
+  if (clip.activeKeyframeView === 'speed') {
+    const realSpeed = converterSpeed(value);
+    displayValue = `${realSpeed.toFixed(2)}x`;
+  } else if (clip.activeKeyframeView === 'volume') {
+    // Exemplo: converter para dB para o usuário ver algo familiar
+    const db = (value * 100) - 50;
+    displayValue = `${db.toFixed(1)} dB`;
+  } else {
+    displayValue = `${Math.round(value * 100)}%`;
+  }
+
+  setHoverKeyframe({
+    x: e.clientX,
+    y: e.clientY,
+    value: displayValue,
+    visible: true
+  });
+};
 
 
 
@@ -5358,8 +5579,31 @@ return (
                 width: clip.duration * pixelsPerSecond,
               }}
 
+              onMouseMove={(e) => handleClipMouseMove(e, clip)}
+              onMouseLeave={() => setHoverKeyframe(prev => prev ? { ...prev, visible: false } : null)}
+
                //onDoubleClick={(e) =>{ e.stopPropagation(); }}
             >
+
+            <AnimatePresence>
+              {hoverKeyframe?.visible && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed pointer-events-none z-[9999] px-2 py-1 bg-zinc-900 border border-white/20 rounded shadow-2xl flex items-center gap-2"
+                  style={{
+                    left: hoverKeyframe.x + 15, // Offset para não ficar embaixo do cursor
+                    top: hoverKeyframe.y - 10,
+                  }}
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
+                  <span className="text-[10px] font-mono font-bold text-white tracking-tighter uppercase">
+                    {hoverKeyframe.value}
+                  </span>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
               {/* Context Menu (right click mouse) */}
 
