@@ -5060,8 +5060,12 @@ return (
       <div className="flex flex-col h-full w-full bg-[#0a0a0a]">
         <header className="h-16 border-b border-zinc-800 flex items-center justify-between px-8 bg-[#111]">
           <div className="flex items-center gap-4">
-            <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center font-black text-white">FC</div>
-            <h1 className="text-lg font-bold italic text-white">FREECUT <span className="text-zinc-500 font-light text-sm not-italic">MANAGER</span></h1>
+            <img 
+              src="logoFreeCut.png" 
+              alt="FreeCut Logo" 
+              className="w-10 h-10 object-contain" // Mesmas dimensões do div antigo
+            />
+            <h1 className="text-lg text-white"> Free<span className='font-bold'>Cut</span> <span className="text-zinc-500 font-light text-sm not-italic">MANAGER</span></h1>
           </div>
           <button className="p-2 hover:bg-zinc-800 rounded-full text-zinc-400"><Settings size={20} /></button>
         </header>
@@ -5078,8 +5082,21 @@ return (
                 <h2 className="text-3xl font-black text-white mb-1">Your Productions</h2>
                 <p className="text-zinc-600 text-[10px] font-mono uppercase">{rootPath || 'Select a workspace'}</p>
               </div>
-              <button onClick={() => setIsCreatingNew(true)} className="bg-red-600 hover:bg-red-700 text-white px-8 py-3 rounded-xl font-black text-xs flex items-center gap-2 transition-all shadow-xl shadow-red-900/40">
-                <Plus size={20} strokeWidth={3} /> NEW PROJECT
+              <button 
+                className="
+                  relative flex items-center gap-2 px-8 py-3 
+                  bg-black text-white font-black text-xs rounded-xl
+                  transition-all duration-300
+                  hover:shadow-[0_0_15px_rgba(34,211,238,0.2)] hover:scale-[1.02]
+                  
+                  border border-transparent
+                  [background:linear-gradient(#000,#000)_padding-box,linear-gradient(to_right,#06b6d4,#d946ef)_border-box]
+                "
+
+                onClick={() => setIsCreatingNew(true)} 
+              >
+                <Plus size={20} strokeWidth={3} className="text-white" />
+                <span className="tracking-widest uppercase">New Project</span>
               </button>
             </div>
 
@@ -5089,7 +5106,7 @@ return (
                   key={proj.path} 
                   whileHover={{ scale: 1.02 }} 
                   onClick={() => openProject(proj.path)}
-                  className="group bg-[#121212] border border-zinc-800/50 rounded-2xl overflow-hidden cursor-pointer hover:border-red-600 transition-all relative"
+                  className="group bg-[#121212] border border-zinc-800/50 rounded-2xl overflow-hidden cursor-pointer hover:border-fuchsia-400 transition-all relative"
                 >
                   <button 
                     onClick={(e) => { e.stopPropagation(); setProjectToDelete(proj); }}
@@ -5098,7 +5115,7 @@ return (
                     <X size={14} /> 
                   </button>
                   <div className="aspect-video bg-[#1a1a1a] flex items-center justify-center border-b border-zinc-800">
-                    <LayoutGrid size={40} className="text-zinc-800 group-hover:text-red-600/20" />
+                    <LayoutGrid size={40} className="text-zinc-800 group-hover:text-fuchsia-800/20" />
                   </div>
                   <div className="p-5">
                     <h3 className="font-bold text-zinc-100 truncate text-sm uppercase">{proj.name}</h3>
@@ -5121,7 +5138,7 @@ return (
           <div className="flex items-center gap-3">
             <button 
               onClick={() => setIsImportModalOpen(true)}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-[10px] font-black px-6 py-2 rounded-full transition-all active:scale-95 shadow-lg shadow-red-900/20"
+              className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-black px-6 py-2 rounded-full transition-all active:scale-95 shadow-lg shadow-red-900/20"
             >
               <Youtube size={14} /> Download
             </button>
@@ -5144,7 +5161,7 @@ return (
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
               <div onClick={handleImportFile} className="aspect-video border border-dashed border-zinc-800 rounded-xl flex flex-col items-center justify-center group cursor-pointer hover:bg-zinc-900/50 mb-4 transition-colors">
-                <Plus size={20} className="text-zinc-700 group-hover:text-red-500 transition-colors" />
+                <Plus size={20} className="text-zinc-700 group-hover:text-fuchsia-400 transition-colors" />
                 <h2 className="text-[9px] font-black text-zinc-500 uppercase mt-2">Import Media</h2>
               </div>
 
@@ -5612,12 +5629,12 @@ return (
 
     {/* PLAYHEAD - Now released inside the scroll container. */}
     <div ref={playheadRef}
-      className="absolute top-0 bottom-0 w-[2px] bg-red-600 z-[100] pointer-events-none transition-transform duration-75 ease-out" 
+      className="absolute top-0 bottom-0 w-[2px] bg-sky-600 z-[100] pointer-events-none transition-transform duration-75 ease-out" 
       style={{ left: asidetrackwidth + 15 }} // +8 por causa do padding p-2 do container
 
     >
         {/* Needle head (Triangle or Circle) */}
-        <div onMouseDown={handlePlayheadMouseDown}  className="w-4 h-4 bg-red-600 rounded-b-full shadow-[0_0_10px_rgba(220,38,38,0.5)] -ml-[7px]" />
+        <div onMouseDown={handlePlayheadMouseDown}  className="w-4 h-4 bg-sky-600 rounded-b-full shadow-[0_0_10px_rgba(220,38,38,0.5)] -ml-[7px]" />
     </div>
 
  
@@ -6199,7 +6216,7 @@ return (
           </button>
           <button 
             onClick={handleFinishSetup} 
-            className="flex-1 bg-red-600 hover:bg-red-700 py-4 rounded-2xl font-black text-xs text-white uppercase tracking-widest shadow-lg shadow-red-900/20 transition-all"
+            className="flex-1 bg-cyan-500 hover:bg-cyan-600 py-4 rounded-2xl font-black text-xs text-white uppercase tracking-widest shadow-lg shadow-red-900/20 transition-all"
           >
             Create Project
           </button>
@@ -6218,7 +6235,7 @@ return (
             <input type="text" placeholder="Video URL..." value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)}
               className="w-full bg-black border border-zinc-700 rounded-xl px-4 py-4 text-sm font-bold text-white outline-none focus:border-red-600 mb-6" />
             <button disabled={isDownloading} onClick={handleYoutubeDownload}
-              className={`w-full py-4 rounded-xl font-black text-xs text-white ${isDownloading ? 'bg-zinc-800' : 'bg-red-600 hover:bg-red-700'}`}>
+              className={`w-full py-4 rounded-xl font-black text-xs text-white ${isDownloading ? 'bg-zinc-800' : 'bg-rose-700 hover:bg-rose-800'}`}>
               {isDownloading ? "DOWNLOADING..." : "FETCH MEDIA"}
             </button>
             <button onClick={() => setIsImportModalOpen(false)} className="w-full mt-4 text-[10px] text-zinc-500 font-bold uppercase"> Close </button>
@@ -6262,7 +6279,7 @@ return (
         <div className="space-y-2">
            <div className="relative h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
               <motion.div 
-                className="h-full bg-red-600 shadow-[0_0_20px_rgba(220,38,38,0.8)]"
+                className="h-full bg-cyan-600 shadow-[0_0_20px_rgba(220,38,38,0.8)]"
                 initial={{ width: "0%" }}
                 animate={{ width: `${renderPercent}%` }}
               />
