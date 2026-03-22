@@ -55,6 +55,12 @@ struct Project {
     path: String
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Dimensions {
+    pub x: f64, 
+    pub y: f64,
+}
+
 
 #[derive(serde::Serialize)]
 pub struct VideoMetadata {
@@ -126,6 +132,49 @@ pub struct ProjectSettings {
     background_color: String,
     #[serde(rename = "sampleRate")]
     sample_rate: u32,
+}
+
+
+#[tauri::command]
+async fn get_asset_dimensions(path: String) -> Result<Dimensions, String> {
+    let path_obj = Path::new(&path);
+    
+    let extension = path_obj.extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_lowercase())
+        .ok_or("Arquivo sem extensão válida")?;
+
+    // --- LÓGICA PARA IMAGENS ---
+    if ["jpg", "jpeg", "png", "webp", "bmp"].contains(&extension.as_str()) {
+        let img = image::image_dimensions(&path)
+            .map_err(|e| format!("Erro ao ler imagem: {}", e))?;
+        return Ok(Dimensions { x: img.0 as f64, y: img.1 as f64 });
+    }
+
+    // --- LÓGICA PARA VÍDEOS (Via OpenCV) ---
+    // OpenCV abre o arquivo e lê o cabeçalho via FFmpeg interno do sistema
+    let mut v_cap = videoio::VideoCapture::from_file(&path, videoio::CAP_ANY)
+        .map_err(|e| format!("OpenCV não conseguiu abrir o vídeo: {}", e))?;
+
+    let opened = videoio::VideoCapture::is_opened(&v_cap)
+        .map_err(|e| e.to_string())?;
+
+    if !opened {
+        return Err("Falha ao abrir stream de vídeo".to_string());
+    }
+
+    // CAP_PROP_FRAME_WIDTH e HEIGHT retornam as dimensões reais do vídeo
+    let width = v_cap.get(videoio::CAP_PROP_FRAME_WIDTH).map_err(|e| e.to_string())?;
+    let height = v_cap.get(videoio::CAP_PROP_FRAME_HEIGHT).map_err(|e| e.to_string())?;
+
+    if width == 0.0 || height == 0.0 {
+        return Err("Não foi possível determinar as dimensões do vídeo".to_string());
+    }
+
+    Ok(Dimensions {
+        x: width,
+        y: height,
+    })
 }
 
 #[tauri::command]
@@ -962,7 +1011,7 @@ fn delete_file(path: String) -> Result<(), String> {
 }
 
 #[command]
-async fn get_video_metadata(path: String) -> Result<VideoMetadata, String> {
+async fn get_duration(path: String) -> Result<VideoMetadata, String> {
     // Command: ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 path
     let output = Command::new("ffprobe")
         .args([
@@ -979,6 +1028,9 @@ async fn get_video_metadata(path: String) -> Result<VideoMetadata, String> {
 
     Ok(VideoMetadata { duration })
 }
+
+
+
 
 use opencv::{prelude::*, videoio, core, imgcodecs};
 use base64::{engine::general_purpose, Engine as _};
@@ -1198,7 +1250,7 @@ fn main() {
             read_specific_file, 
             load_specific_project, 
             rename_file, 
-            get_video_metadata, 
+            get_duration, 
             generate_thumbnail, 
             delete_file, 
             get_video_frame, 
@@ -1210,7 +1262,8 @@ fn main() {
             copy_file,
             load_project_config,
             save_project_config,
-            create_project_setup
+            create_project_setup,
+            get_asset_dimensions
            
         ])
         .run(tauri::generate_context!())

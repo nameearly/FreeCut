@@ -28,6 +28,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-localhost = "2.0.0" # Verifique a versão compatível com seu Tauri
 percent-encoding = "2.3"
 tiny_http = "0.12"
-opencv = "0.92"
+opencv = "0.93"
 base64 = "0.21"
 tokio = { version = "1", features = ["full"] }
+image = "0.24"

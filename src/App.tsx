@@ -128,6 +128,8 @@ interface Clip {
   fadeout?: number;
   fadeinAudio?: number;
   fadeoutAudio?: number;
+  dimentions?: Position | null;
+  scale?: number;
   keyframes?: {
   volume?: Keyframe[];
   opacity?: Keyframe[];
@@ -160,6 +162,7 @@ interface Asset {
   duration: number;   
   type: 'video' | 'audio' | 'image';
   thumbnailUrl?: string; // URL genarate by FFmpeg
+  dimentions?: Position
 }
 
 interface Tracks
@@ -3117,20 +3120,25 @@ const createClipOnNewTrack =  async (assetName: string, dropTime: number, beginm
     
   
   var meta;
-
+  
   const path = `${currentProjectPath}/videos/${assetName}`
 
   
   
   try
   {
-    meta = await invoke<{duration: number}>('get_video_metadata', { path: path });
+    meta = await invoke<{duration: number}>('get_duration', { path: path });
     
   }
   catch (err)
   {
     meta = {duration: 10}
   }
+
+  const type = knowTypeByAssetName(assetName, true);
+
+  const dimentions = assets.find( a => a.name === assetName)?.dimentions || null
+
     
     setTracks(  (prev) => 
       {
@@ -3138,7 +3146,7 @@ const createClipOnNewTrack =  async (assetName: string, dropTime: number, beginm
           const newTrackId = prev.length > 0 ? Math.max(...prev.map(t => t.id)) + 1 : 0; 
    
          
-          const type = knowTypeByAssetName(assetName, true);
+          
 
           const updatedTracks = [...prev, { 
             id: newTrackId, 
@@ -3165,7 +3173,9 @@ const createClipOnNewTrack =  async (assetName: string, dropTime: number, beginm
             color: getRandomColor(),
             trackId: newTrackId,
             maxduration: duration,
-            beginmoment: beginmoment ? beginmoment : deleteClip ? deleteClip.beginmoment : 0
+            beginmoment: beginmoment ? beginmoment : deleteClip ? deleteClip.beginmoment : 0,
+            dimentions: dimentions,
+            scale: 1
           };
 
 
@@ -3386,16 +3396,32 @@ const handleNativeDrop = async (paths: string[], mouseX: number, mouseY: number)
         const fileName = path.split(/[\\/]/).pop() || "Asset";
 
         var meta
+        var dimentions: Position | null
         
         try
         {
-          meta = await invoke<{duration: number}>('get_video_metadata', { path: path });
+          meta = await invoke<{duration: number}>('get_duration', { path: path });
           
         }
         catch (err)
         {
           meta = {duration: 10}
         }
+
+
+        if(isVideo || isImage)
+        {
+            try
+            {
+              dimentions = await invoke< Position >('get_asset_dimensions', { path: path });
+              
+            }
+            catch (err)
+            {
+              dimentions = null
+            }
+        }
+        
 
         
         const duration = meta.duration
@@ -3452,7 +3478,9 @@ const handleNativeDrop = async (paths: string[], mouseX: number, mouseY: number)
               color: getRandomColor(),
               trackId: targetTrackId,
               maxduration: duration ? duration : 10,
-              beginmoment: 0
+              beginmoment: 0,
+              dimentions: dimentions,
+              scale: 1
             }]);
 
 
@@ -3575,10 +3603,11 @@ const handleFadeDrag = (e: React.MouseEvent, clipId: string, type: 'in' | 'out',
       if (['mp3', 'wav', 'ogg'].includes(extension || '')) type = 'audio';
 
       let duration = 10;
+      let dimentions: Position | null = null
 
       if (type !== 'image') {
         try {
-          const meta = await invoke<{duration: number}>('get_video_metadata', { path: filePath });
+          const meta = await invoke<{duration: number}>('get_duration', { path: filePath });
           duration = meta.duration;
         } catch (err) {
           console.warn(`Não foi possível ler meta de ${filename}`, err);
@@ -3600,6 +3629,21 @@ const handleFadeDrag = (e: React.MouseEvent, clipId: string, type: 'in' | 'out',
       }
 
 
+      if((type == 'video') || (type == 'image'))
+      {
+           try {
+            dimentions =  await invoke('get_asset_dimensions', { 
+              path: filePath
+            });
+
+
+            
+          } catch (e) {
+            console.error("Falha na extração automática:", e);
+          }
+      }
+
+
 
 
 
@@ -3612,7 +3656,18 @@ const handleFadeDrag = (e: React.MouseEvent, clipId: string, type: 'in' | 'out',
       }
 
       
-      return {
+       if((type == 'video') || (type == 'image'))
+        return {
+          name: filename,
+          path: filePath,
+          duration: duration,
+          type: type,
+          thumbnailUrl: thumbPath,
+          dimentions: dimentions          
+        } as Asset;
+
+
+        return {
         name: filename,
         path: filePath,
         duration: duration,
@@ -3920,11 +3975,18 @@ const handleDropOnTimeline = (e: React.DragEvent, trackId: number) => {
 
   if (data)
   {
+
+    console.log('data on')
+
+    
       const droppedClip = JSON.parse(data);
 
       
       // 1. Try to find the corresponding asset.
       const assetNow = assets.find(a => a.name === droppedClip.name);
+
+
+      console.log('assetNow di', assetNow?.dimentions)
       
       // 2. Set the default duration safely.
       // If assetNow exists and is greater than 10, use 10. Otherwise, use its duration or 5 (total fallback).
@@ -3933,8 +3995,6 @@ const handleDropOnTimeline = (e: React.DragEvent, trackId: number) => {
 
       const isBusy = (isSpaceOccupied(trackId, dropTime, droppedClip.duration, null))
       const isNotType = tracks.find( t => t.id === trackId)?.type !== knowTypeByAssetName(droppedClip.name ,true)
-
-
       
       
       if(!isBusy && !isNotType)
@@ -3948,7 +4008,9 @@ const handleDropOnTimeline = (e: React.DragEvent, trackId: number) => {
             color: getRandomColor(),
             trackId: trackId,
             maxduration: totalMaxDuration,
-            beginmoment: droppedClip.beginmoment
+            beginmoment: droppedClip.beginmoment,
+            dimentions: assetNow?.dimentions ? assetNow?.dimentions : null,
+            scale: 1
           };
 
           setClips(prev => [...prev, newClip]);
@@ -4044,7 +4106,8 @@ const handleDropOnTimeline = (e: React.DragEvent, trackId: number) => {
 
     const isBusy = (isSpaceOccupied(trackId, dropTime, Math.min(defaultDuration, 10), null))
     const isNotType = tracks.find( t => t.id === trackId)?.type !== knowTypeByAssetName(assetName,true)
-
+ 
+          
 
     
     if(!isBusy && !isNotType)
@@ -4058,7 +4121,9 @@ const handleDropOnTimeline = (e: React.DragEvent, trackId: number) => {
           color: getRandomColor(),
           trackId: trackId,
           maxduration: totalMaxDuration,
-          beginmoment: 0
+          beginmoment: 0,
+          dimentions: assetNow?.dimentions ? assetNow?.dimentions : null,
+          scale: 1
         };
 
         setClips(prev => [...prev, newClip]);
@@ -5938,9 +6003,9 @@ return (
 
                             //variaveis temporarias 
 
-                            const scale = 1
-                            const clipWidth = projectConfig.width - 10
-                            const clipHeight = projectConfig.height
+                            const scale = clip?.scale || 1
+                            const clipWidth = clip?.dimentions?.x || projectConfig.width
+                            const clipHeight = clip?.dimentions?.y|| projectConfig.height
 
 
 
